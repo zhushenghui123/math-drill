@@ -1,0 +1,7 @@
+{
+  "name": "gamifier",
+  "phase": "1",
+  "enabled": true,
+  "blob_fields": ["game"],
+  "description": "游戏化：承接 fork game.js 的 XP/成就设置（习惯存活）"
+}

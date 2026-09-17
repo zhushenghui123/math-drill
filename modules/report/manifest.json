@@ -1,0 +1,7 @@
+{
+  "name": "report",
+  "phase": "3",
+  "enabled": false,
+  "blob_fields": [],
+  "description": "周度薄弱报告（只读 attempts + kp_state）"
+}

@@ -1,0 +1,1 @@
+# deploy/logrotate.d/math-drill —— 单文件日志轮转，必须 copytruncate（fd 继承写入，见 ARCHITECTURE §12.1 注①）

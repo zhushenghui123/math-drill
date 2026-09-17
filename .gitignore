@@ -1,0 +1,7 @@
+# 运行时数据与版权材料一律不入仓（H8 / ADR-008 / §14.1 豁免表）
+data/
+references/
+*.db
+*.db-wal
+__pycache__/
+*.pyc

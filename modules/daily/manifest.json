@@ -1,0 +1,8 @@
+{
+  "name": "daily",
+  "phase": "1",
+  "enabled": true,
+  "rpc": ["today"],
+  "blob_fields": ["daily"],
+  "description": "每日任务单：首建锁定 generated_at"
+}

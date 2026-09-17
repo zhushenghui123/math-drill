@@ -1,0 +1,6 @@
+{
+  "name": "linalg_det",
+  "phase": "1",
+  "enabled": true,
+  "description": "线代 Ch1 行列式题源（Phase 1 唯一题源；同 seed 同输出）"
+}

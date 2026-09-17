@@ -1,0 +1,4 @@
+# config/modules.toml —— 模块启停表（tomllib 只读；后者优先于 manifest 的 enabled）
+
+[modules]
+# 例：classroom = false   # Phase 1 隐藏入口（D3）

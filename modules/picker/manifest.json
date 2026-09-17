@@ -1,0 +1,7 @@
+{
+  "name": "picker",
+  "phase": "2b",
+  "enabled": false,
+  "blob_fields": ["kp_state"],
+  "description": "带时间衰减的加权选题器（测试先行）"
+}

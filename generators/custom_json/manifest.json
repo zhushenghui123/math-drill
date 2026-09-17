@@ -1,0 +1,6 @@
+{
+  "name": "custom_json",
+  "phase": "1",
+  "enabled": false,
+  "description": "外部题源导入（兼容基底 customQ 格式；用户自带内容）"
+}

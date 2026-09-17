@@ -1,0 +1,1 @@
+# contracts/dep_matrix.toml —— 6×6 允许依赖矩阵（ARCHITECTURE §11.4）；tests/test_dep_rules.py 读它执法

@@ -1,0 +1,7 @@
+{
+  "name": "classroom",
+  "phase": "5",
+  "enabled": false,
+  "blob_fields": ["classrooms", "chats"],
+  "description": "多智能体课堂（Phase 1 隐藏入口，代码保留；D3）"
+}

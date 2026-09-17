@@ -1,0 +1,7 @@
+{
+  "name": "review",
+  "phase": "2a",
+  "enabled": false,
+  "blob_fields": ["kp_state"],
+  "description": "SM-2 + kp_state 段迁移（含迁移器）"
+}

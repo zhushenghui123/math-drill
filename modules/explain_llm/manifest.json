@@ -1,0 +1,7 @@
+{
+  "name": "explain_llm",
+  "phase": "5",
+  "enabled": false,
+  "blob_fields": [],
+  "description": "讲解通道：客户端直连 LLM，服务端零代理（红线）"
+}

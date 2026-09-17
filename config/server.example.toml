@@ -1,0 +1,2 @@
+# config/server.example.toml —— 对照样例（不含任何凭据；token 只走 /etc/math-drill/token）
+# 单源：server.toml @ config/server.toml

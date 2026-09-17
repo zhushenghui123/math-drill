@@ -1,0 +1,2 @@
+# deploy/caddy.block —— 追加到 /root/obsidian-livesync/Caddyfile 的站点块
+# 照 reader.* 的写法（带 tls dns cloudflare），不是照 obsidian.*

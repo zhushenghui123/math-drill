@@ -1,0 +1,8 @@
+{
+  "name": "practice",
+  "phase": "1",
+  "enabled": true,
+  "rpc": ["submit", "next"],
+  "blob_fields": ["daily"],
+  "description": "答题会话：调 core.judge 判分，记录会话状态"
+}

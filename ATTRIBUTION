@@ -1,0 +1,14 @@
+本仓库继承自 fork（MIT 许可）：
+
+  上游：111wukong/kaoyan-math-tutor
+  URL ：https://github.com/111wukong/kaoyan-math-tutor.git
+  Pin ：82c014479f712a88b43fc147ab92d824c0ccc784（master, 2026-09-14）
+  许可：MIT（上游 LICENSE 随本仓库保留）
+
+为什么钉 commit：T5 的「511 项全绿」基线是该 commit 的实测值（复核者本机复跑
+`node web/tests/run-all.js` → 511 项全通过）。上游漂移不自动跟随；升级 commit 必须
+同步更新本文件并重跑 T5，否则那个数字失去意义。
+
+本仓库**不含**上游的 `.git`；作为独立仓库起步。继承面逐文件裁定见 docs/BOUNDARY.md。
+注意：MIT 只覆盖代码，不覆盖上游 `js/data-questions.js` 的题目数据（授权链未声明），
+故我方**替换**而非沿用其题库——这也是合规理由，不只是质量问题。

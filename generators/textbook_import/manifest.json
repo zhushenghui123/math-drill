@@ -1,0 +1,6 @@
+{
+  "name": "textbook_import",
+  "phase": "4",
+  "enabled": false,
+  "description": "教材课后题导入管道（远期；与 OCR 数据管线对接）"
+}

@@ -1,0 +1,2 @@
+# deploy/math-drill.service —— systemd 单元（字段表见 ARCHITECTURE §12.1）
+# ExecStart 不带绑定参数；只绑 127.0.0.1:8081

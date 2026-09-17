@@ -1,0 +1,720 @@
+# 架构设计 v2（骨架冻结稿）
+
+> 项目：`math-drill`（工作名）· 考研数学自适应练题系统
+> 状态：**v2 冻结** —— 外部评审（Claude, GO WITH CHANGES）五条修改已全部采纳；本文是后续实现的唯一架构依据
+> 性质：纯设计文档，无实现代码。字段表与签名是契约，不是可执行物
+> 变更规则：此后任何架构级改动必须以 ADR 形式附记在 `docs/DECISIONS.md`，禁止无声变更
+
+---
+
+## 0. 已定案的四条架构决策（ADR 摘要，完整版见 docs/DECISIONS.md）
+
+| ADR | 决策 | 裁判 |
+|---|---|---|
+| 001 | **基底 = fork kaoyan-math-tutor**（MIT），不选 gre2tor/OATutor/重构 | 外部评审：★0 不构成否决项；真正风险是继承面（已列边界表） |
+| 002 | **存储同步 = 方案 A blob 同步**，废弃原子端点设计 | 评审定案；N=1 把 N=1000 的问题解掉属过度设计 |
+| 003 | **判定 = 类型驱动 + fail-closed**；判分永在服务端；LLM 永不进判定链路 | 双方一致；MVP 不引 sympy |
+| 004 | **调度起点 = SM-2 迁移版；FSRS 是 Phase 4 选项** | 一阶决策是粒度（KP 极）非算法；数据量不足喂不饱 FSRS optimizer |
+| 005 | **服务端零第三方依赖**（纯 stdlib） | 部署简单性 > 功能丰富度；`drill/tests` 用 `unittest` 统一而非 pytest |
+
+---
+
+## 1. 分层架构（终版，含评审修正后的真实威胁模型）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 客户端（fork 改造，KaTeX，手机优先）                            │
+│   │ 废弃 localStorage —— 唯一存储交互 = api.js 同步桥          │
+│   │ ① 进度数据: blob 去抖同步（PUT 带版本号）                   │
+│   │ ② 判定: 原始输入上传 /api/judge，服务端独占判定             │
+│   │ ③ LLM 讲解: 直连模型 API（用户自带 key，仅限讲解侧）         │
+│   │    ⚠️ 此线路绕过服务端 —— 评审修正：威胁模型必须包含它        │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ HTTPS（拉取式，无推送）
+        Caddy(Docker, Cloudflare DNS-01, math.zhu2006.xyz)
+                       │ reverse_proxy 127.0.0.1:8081
+┌──────────────────────▼──────────────────────────────────────┐
+│ math-drill server（Python 3.12 stdlib, 零依赖）               │
+│   http.server 路由 + judge.py + store.py(假设 blob 持久化)     │
+│   Phase 2: scheduler.py（KP 记忆状态 + 带时间衰减的选题）        │
+│   sqlite3 (WAL) + meta.schema_version                        │
+│   判定是唯一写入口，正确性必须由服务端保证                       │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+        离线打包：scripts/gen_bundles.py 产出 bundle → 灌入 questions 表（⚠️ 非运行时端点，见 §11.5）
+        generator 总线: 数学内核(generators/*) → 离线产出 JSON
+                        ↓ 部署时灌入 questions 表
+```
+
+**威胁模型表（评审根因 4 修正）**
+
+| 通道 | 控制面 | 位置 |
+|---|---|---|
+| 写入 API（state/judge/daily） | 长效 token cookie (HttpOnly+Secure+SameSite=Strict) + rate-limit | server |
+| 静态读取 | **匿名只读**（不加门；`web/tests/**` 与 dotfile 一律 403）——定案见 §13.3「静态面是否过 token 门」；原写「见 §7 开放」为悬空引用（§7 无此项） | bridge |
+| LLM 直连（出网） | 用户自带 key，只走讲解链路；服务端**不设**代理，**永不**存储 key | 客户端 |
+| 运维面 SSH | fail2ban 已在跑（不复述用户职责） | 服务器已有 |
+
+---
+
+## 2.（SUPERSEDED，仅留演进对照）仓库骨架 v1 树
+
+> ⚠️ **本节自 v2.1 起被 §10.B 取代，v2.2 起以 §11 修订树为真值**——保留仅为演进对照，禁止照此搭骨架。
+> 质检官 S3 指出的「双真相源」已由本横幅闭合。
+
+```
+math-drill/                    ← 工作名（命名开放：可换 kanm-drill 等学生最终定）
+├── docs/
+│   ├── ARCHITECTURE.md        # ← 本文件 v2 冻结
+│   ├── JUDGE_CONTRACT.md      # 判定契约（answer_type 语义 + fail-closed 规则）
+│   ├── DECISIONS.md           # ADR 记录（001-005 + 后续）
+│   └── BOUNDARY.md            # 继承面边界表（2,606 行存留裁决）
+├── server/
+│   ├── app.py                 # http.server 入口 + 路由表 + token 中间件
+│   ├── judge.py               # fail-closed 判定器（类型驱动）— [Day-1]
+│   ├── store.py               # sqlite3(WAL) blob 存储 + 版本仲裁
+│   ├── scheduler.py           # [P2a/2b] kp_state + 带时间衰减的加权选题
+│   ├── generator_bus.py       # 生成器总线（部署时把 bundle 灌入 questions）
+│   ├── report.py              # [P3] 周度薄弱报告（服务端计算）
+│   └── config.py              # 常量：端口/token TTL/τ 默认值/rate-limit
+├── math/                      # ← 已完成部分迁移至此
+│   ├── exact.py               # 已写（454 行/30 断言）—— 唯一存量代码
+│   └── generators/            # [P1] Ch1-內行列式；Ch2 矩阵……逐章追加
+├── web/                       # fork 自 kaoyan-math-tutor（见 BOUNDARY.md)
+│   ├── index/html/css/js/*    # 继承（$保留$清单在边界表）
+│   ├── js/api.js              # [新增，~100 行] 唯一存储交互桥
+│   └── js/judge-client.js     # [迁移] 判定调用 → /api/judge（移除 parseFloat）
+├── scripts/
+│   ├── gen_bundles.py         # 生成器 CLI → data/bundle-vN.json（可复现 seed）
+│   ├── db_init.py             # schema_version 初始化 + kp 表灌入
+│   └── backup_check.sh        # sqlite .backup + integrity_check（systemd timer）
+├── tests/
+│   ├── test_exact.py          # 已有（迁移到 unittest 统一）
+│   ├── test_judge.py          # 10 例回归 + 类型边界攻击组 [Day-1 先红后绿]
+│   ├── test_api.py            # 端点契约（本地起服、无外网依赖）
+│   ├── test_store.py          # blob 版本仲裁/冲突合并规则单测
+│   └── test_scheduler.py      # [P2b 先写] 时间衰减/饱和/新颖性/确定性等
+├── deploy/
+│   ├── math-drill.service     # systemd：User=math-drill, NoNewPrivileges,
+│   │                          #   PrivateTmp, ProtectSystem=strict + ReadWritePaths
+│   ├── caddy.block            # 站点块（并入 /root/obsidian-livesync/Caddyfile）
+│   └── backup.timer           # SQLite .backup → /var/backups, 保留 7 份
+├── data/                      # 运行时数据（.gitignore）
+└── README.md / LICENSE / ATTRIBUTION（fork 出处 + MIT 传承）
+```
+
+---
+
+## 3. 数据契约（字段表 + 约束，非 DDL）
+
+### 3.1 `questions` — 题库（服务端持有，客户端 bundle 同源离线生成）
+
+> 命名统一（回应复核 M1）：v2 初稿此处写 `qa`，而 ADR-007 / JUDGE_CONTRACT §6 / §1 图用 `questions`。**统一定为 `questions`**，全仓不再出现 `qa` 作为表名。
+
+| 字段 | 类型 | 约束/说明 |
+|---|---|---|
+| id | TEXT | 稳定 id = hash(gen_params)；同参数再生同题 |
+| bundle_version | INT | 生成器产出包版本 |
+| kid | TEXT | 知识点 id（与 kp.id 对齐；FK 软约束） |
+| type | TEXT | 'choice' / 'blank' / 'solution' |
+| **answer_type** | TEXT | **rational 一体化（integer 并入）** / vector / matrix / interval / set / symbolic / self_report |
+| stem | TEXT | 题干（KaTeX 语法） |
+| options | TEXT? | 选择题 JSON |
+| answer | TEXT | 规范答案（可序列化） |
+| analysis | TEXT? | 解析（pitfalls/kp 说明） |
+| difficulty | INT | 1-4 |
+| gen_params | TEXT? | 生成参数快照（可复现性保证） |
+| source | TEXT | 'generated' / 'custom_json' / （未来）'textbook' |
+
+**约束**：`answer_type='symbolic'` 的题 → 判定只走 self_report 通道，服务端不猜。
+
+### 3.2 `kp`（知识点注册表 —— 从基底 68 考点树导入服务端，解关注册完整性）
+
+| 字段 | 说明 |
+|---|---|
+| id | 'c1n1'…（与基底 kid 同构，白嫖评审认可的资产） |
+| title / chapter / subject | 展示用 |
+| exam | 'all' / ['m1'] / ['m1','m3']（基底现成的考纲作用域，Q6 补充 advantageous） |
+| related | 知识点边（薄弱点传播用，Phase 2b） |
+
+### 3.3 `attempts`（append-only，不可修改）
+
+| 字段 | 说明 |
+|---|---|
+| id INTEGER PK | 单调递增（blob 合并的仲裁键之一） |
+| ts | 服务端时间（**不接受客户端时间**，防时钟偏差） |
+| qid / kid / correct(0/1/NULL) | |
+| verdict | 'server_true' / 'server_false' / 'self_reported' / 'undecidable' |
+| user_ms / device | 可选 |
+
+### 3.4 `kp_state`（Phase 2a 才启用；先定粒度）
+
+| 字段 | 说明 |
+|---|---|
+| kid PK | **粒度 = (user, kid) 一行**——评审定案：一阶决策就是粒度 |
+| ef/interval/reps/lapses/due/last_review | SM-2 迁移版 |
+| stability/difficulty（P4 可选） | FSRS 二阶字段（预留，不填） |
+
+### 3.5 Sync 契约（blob 合并规则，N=1 简化版）
+
+> ⚠️ **真值位置（v2.7）**：本表的真值已归入 `contracts/blob_merge.md`（§11.9 树）。此处为**人读摘录**；两处不一致时以 `contracts/blob_merge.md` 为准。
+
+| 顶层字段 | 合并规则 |
+|---|---|
+| ~~attempts[]~~ | ~~append-only 按 id 合并~~ **← 已废弃（v2.5）：ADR-007 已将 attempts 退役出 blob**，服务端 `attempts` 表为唯一事实源；照本行实现会产生双写路径 |
+| cards / daily | 按 updated_at **newer-wins** |
+| settings | **server 是真相源**；客户端改设置=显式 PUT 特殊段（避免两个设备设置互踩） |
+| checkins / game / notes | newer-wins |
+
+冲突仲裁 = 服务端 server_version 单调递增 + 客户端 base_version 匹配；失败 → 返回 409 + 服务端最新 blob。
+
+---
+
+## 4. 判定契约（JUDGE_CONTRACT v0，Day-1 落地）
+
+- **输入**：`{qid, kid, raw_answer:str, answer_type?, user_ms?}`
+- **判定器行为**（fail-closed 三分支）：
+  1. `rational/vector/matrix` → 服务端解析为规范型 → 精确比对 → correct ∈ {true,false}
+  2. 解析失败或类型过界 → `undecidable` → **降级 self_report**（记录 verdict，绝不猜）
+  3. `symbolic/self_report` → 一等公民通道，用户读标准答案后自评
+- **回归命令**：评审给的 10 例（5 攻击 5 控制）→ `tests/test_judge.py` 首尾对齐；**目标 10/10 且 0 假阳性**
+- `norm()` 保留（fork 里最值钱的资产），`parseFloat` 回退**删除**（评审根因 2）
+
+---
+
+## 5. 选题契约（Phase 2b，先写测试后实现）
+
+**权重输入必须是当前时刻可计算的**（评审原话，强制约束）：
+
+```
+输入（全部可由服务端注入，无历史累计裸值）:
+  win_rate(kid, N=8)          # 近 N 次（默认 8），无 recency-weight，暂不做注入
+  days_since_last(kid)
+  due_pressure(kid)           # SM-2 due 步迫度
+  inherit_wrongs_id_content   # 历史 wrongs 计数必须经 exp(-Δdays/τ) 衰减
+  τ 默认 10 天（`config/server.toml` → `[picker] tau_days`，见 §13）
+禁止: 无时间边界的历史累计直接加权重（评审根因 1 的反面教材）
+```
+
+**先写的单测清单**（TDD 顺序锁死）：
+1. 饱和：连续答对 8 次 → 权重不再上升（防"永久简单"）
+2. 衰减：同错题 30 天后不再支配权重（防「永久惩罚」——评审立案的镜像病）
+3. 新颖性：未练过的 KP 仍排前
+4. 确定性：给定 seed 同输入同输出（防 UI 层依赖 rand 影响可复现性）
+5. 空态：全新 KP 无状态时的默认权重（N=1 用户第一天的体验）
+6. 数量守恒：N=1 升到每日 5-8 题时权重排序稳定（不翻转）
+
+**降级总则**：任何时候判定失败或状态缺失，系统往**保守**侧掉（新 KP 默认权重=经典基底权重，不凭空造新数据）。
+
+---
+
+## 6. 验收门（Phase Gate，措辞要可测量）
+
+| Phase | 验收门槛（不达标不进下一阶段） |
+|---|---|
+| **1 最小闭环** | ① blob 同步两台设备互通（手动验证清单）；② 判定 10/10 + 0 假阳性；③ **线代 Ch1（行列式）≥40 题可生成**（Ch2 移出 Phase 1 门槛，回应复核 M6）；④ systemd 正常重启自恢复；⑤ **连续 7 天 × 每天 2 题**真实使用 |
+| **2a 粒度/状态** | ① state.cards 混合键迁移完成；② kp_state 主键定义 + 迁移脚本；③ 45 save() 全部经服务端（无本地写余留） |
+| **2b 选题重写** | ① §5 全部单测先红后绿；② 判定链路无 LLM 参与（审计 grep 证）；③ 真实使用 2 周 |
+| **3 反馈** | 周报字段成型 + 错题准入 Obsidian vault（走已知管道） |
+| **4 题源扩展** | 高数 Ch ≥2 章机动 + sympy 评估报告（此时**才**决策是否引入） |
+| **5 Agent 层** | LLM 讲解 PoC（讲解只在非判定链路）+ 可选 DSH 插件薄客户端 |
+
+---
+
+## 7. 开放微决策（**v2.10 全部收口**）
+
+> 状态：本表**已关闭**。关闭姿势 = 改行加结论，**不删行**（与本文件「不删除、追加状态」的 ADR 纪律一致）。
+
+| # | 决策 | 结论 | 关闭时点 |
+|---|---|---|---|
+| D1 | 项目名 | **`math-drill`**（T0 起冻结）——⚠️ 原文「工作名，开源前可换」是**错的**：名字已硬编码进 `User/Group=math-drill`（§12.1）、`StateDirectory=math-drill`、`/etc/math-drill/token`、`/var/lib/math-drill`、`/var/log/math-drill.log`、`/opt/math-drill` ⇒ 真窗口是 **T0 前，或永不**；T0 是唯一零成本窗口（名字归 D1，域名子域 `math.zhu2006.xyz` 另计） | v2.10 |
+| D2 | `integer` 是否独立于 `rational` | 已定：**合并**（减少类型面，ADR-003 侧） | v2.0 |
+| D3 | classroom 处置 | 已定：**隐藏（`enabled=false`）、代码保留**——与 `BOUNDARY.md` 对 `js/classroom.js`（851 行）的既有裁定一致；执行面落在 **T4**（隐藏入口）与 **T5**（fork 测试面） | v2.10 |
+| D4 | 认证方案 | 已定：**长效 token cookie（HttpOnly + Secure + SameSite=Strict）** + 派生式会话（§13.3）；CF Access 留待 Phase 3 评估 | v2.10 |
+| D5 | τ 衰减常数 | 已定：**10 天**（落点 `config/server.toml` 的 `[picker] tau_days`，P2b 实测后可调） | v2.10 |
+| D6 | fork node 测试落点 | 已定：**`web/tests/`**（整目录搬迁；§11.9 树与 §13.2 的 403 规则已引用它） | v2.10 |
+
+---
+
+## 8. 明确不在 v1 范围（防 scope creep 的边界清单）
+
+- ❌ 多用户 / auth 体系（单用户架构，blob 语义即自证）
+- ❌ 推送通知（决策人明确拒绝——容易出 bug）
+- ❌ sympy / 任何 CAS（P4 才评估，做能力增量不做阻塞）
+- ❌ oplog（方案 A 定案；真实多端冲突 >0/月 才升级）
+- ❌ 解答题自动判定（self_report 是一等公民通道，评审 Q7 已裁决）
+- ❌ 教材课后题录入管道（P3+ 按需求，暂无数据源）
+- ✅ 保留：fork 的 game.js / cards.js（无 key 降级）/ llm.js（讲解侧）/ agent.js（不接线保留）
+- ⛔ **红线**：真题库（墨题库）的题目数据**永远不进开源仓库**；fork 作者未声明题目数据授权链——开源仓库里只舒服代码 + 我方生成器 + customQ 用户自带内容
+
+---
+
+## 9. 变更记录
+
+| 版本 | 日期 | 内容 |
+|---|---|---|
+| v1 | 2026-09-14 | 初稿（见 PCA 记录） |
+| v1.1 | 2026-09-17 | 外部评审请求发出前的技术请求文档 |
+| v2 | 2026-09-17 | **冻结骨架**：吸收评审 5 条修改（判定契约/blob A/选题层重定位/边界表/数字校准） |
+| **v2.1** | 2026-09-17 | **§2 仓库骨架被 §10 取代** —— 按决策人 whale-moe 项目的实践章法改为「一切皆模块」（ADR-006）；§1/§3/§4/§5/§6 契约不变 |
+| **v2.2** | 2026-09-17 | **§11 追加**：质检官三条地基石定案（core 增 `exact/` / 配置 stdlib 化 TOML+JSON / kp_state=段+attempts 退役出 blob）；允许依赖矩阵 6×6；路由统一 bridge 挂载 `/m/*`；S3 全收 |
+| **v2.3** | 2026-09-17 | **三份配套设计文档落地**：`docs/JUDGE_CONTRACT.md`（判定契约 v1：不变量 I1-I6、answer_type 表、fail-closed 决策树、10 例回归 + 6 例类型边界 + 3 条性质测试）、`docs/BOUNDARY.md`（继承面逐文件裁定：源码 9,609 行真值、三处硬接缝、状态字段处置、测试重整、删除候选、合规红线）、`docs/MODULE_TEMPLATE.md`（模块四件套 + MANIFEST 字段表 + 两回调契约 + 七步清单 + 七道质量门 + 反模式表）。另更正 §G 算术错误（源码 9,609 非 10,653） |
+| **v2.4** | 2026-09-17 | **执行交接单落地**：`docs/IMPLEMENTATION_BRIEF.md`（角色与权限边界、施工前必读顺序、10 条硬约束及其验收方式、T0-T8 任务序列与每任务验收命令/证据/停止条件、提交规范、六类必须停下的情况、开放决策表、Phase 1 交付物清单）。配套产出：**v2.3** 的 `JUDGE_CONTRACT.md` / `BOUNDARY.md` / `MODULE_TEMPLATE.md`。设计侧至此冻结，执行交 Codex |
+| **v2.5** | 2026-09-17 | **消歧补丁**（回应独立复核的 6 条硬悬空 + 7 条次要项，不动设计结论）：① 新增 **§11.9 真值树**（合并版，取代所有「§11.4 树」悬空引用）② 新增 **§12 部署规格**（T7 原先指向不存在的 §3.6）③ **入口点定案 = `python3 -m bridge.api`，删 `core/server.py`**（消除 core→bridge 违规边）④ 新增 **§11.4.1 装载豁免**（依赖纪律与激活器的接缝，含 test_dep_rules 三项检查）⑤ 矩阵 core 行补 `contracts ✓`（与 T1 冲突）⑥ `config/modules.yaml` → `.toml`（与禁 YAML 冲突）⑦ 表名统一 `questions`、§3.5 attempts 行标废弃、`/api/questions` 标注为非端点、Phase 1 题源统一为 Ch1 |
+| **v2.6** | 2026-09-17 | **复核第二轮修复**（2 处字面矛盾 + 2 处新缺口 + 卫生）：① T3 产出改正（`core/server.py` → `core/registry.py`）② H10/T5 命令路径改 `node web/tests/run-all.js`③ 新增 **§13 配置与凭据落点**（常量入 `config/server.toml`、token 入 `/etc/math-drill/token` 600 + env 注入 + 缺失拒启、`/setup?t=` 一次性下发 HttpOnly+Secure+SameSite=Strict、轮换流程、验收四项）④ 静态根定案 = `web/`（入口 `web/index.html`，`web/tests/**` 与 dotfile 一律 403），取消含糊的 `web/pages/`⑤ §10.B 补 SUPERSEDED 标记、行内星号误用修正、τ 引用改指 §13） |
+| **v2.7** | 2026-09-17 | **第三轮定点修正**（4 条阻塞 + 3 条清单；含 v2.6 补丁自身引入的 2 条）：① §11.9 `config/` 补 `server.toml` + `server.example.toml`（树 ↔ §13 对撞，B1）② `/setup` 定性为**唯一不过 token 门的引导端点**（B2）③ §12.1 `Environment` 补 `MATH_DRILL_TOKEN_FILE` + 增 `StateDirectory` + `data_dir` 改单源（B3a/c/d）④ §13.3 会话值改 **HMAC 派生**（零存储，「轮换即失效」首次真正成立，B4）⑤ 限速语义写死（按 IP / 固定窗口 / **只计失败** / 成功清零，C-1）⑥ 上游 pin `82c0144`（C-2）⑦ §3.5 标注真值归 `contracts/blob_merge.md`（C-3）⑧ T7 验收 6 → **12 项** + 禁止 `docker compose up -d`、`caddy validate` 先行、回滚 sha256 校验。**驳回** B3b（`append:` 日志由 PID 1 在单元命名空间外打开，不受 `ProtectSystem=strict` 限制，`man 5 systemd.exec` 佐证） |
+| **v2.8** | 2026-09-17 | **第四轮复核修复**（2 阻塞 + **13 清单**）——15 处逐条见 `DECISIONS.md`「ADR-012 · v2.8 追加」；此处只点前 6 类：① **端口单源**（§12.1 `ExecStart` 去参，绑定只读 `config/server.toml`）② **施工单 T3 验收**补 `/setup` 例外（原「无例外面」字面不可满足；v2.7 漏改的第三处）③ §13.3 写死静态面与鉴权次序（越权 403 先于鉴权 401，静态面匿名可读）④ §13.3 补 T3 凭据注入合规解（临时 token 文件 + monkeypatch，不落夹具）⑤ 真值树补 `core/exact/__init__.py`（实测：无它 `from core.exact import det` 报 ImportError）、补 `tests/test_registry.py`、Ch2–Ch6 省略号改为「Phase 1 不预建」⑥ 顶层域清单补 `data/`；§1 威胁模型「见 §7 开放」悬空改指 §13.3；限速语义按端点分域。**维持** v2.7 对 B3b 的驳回。⚠️ v2.9 更正：本行表头原写「6 清单」，实为 13（账本漏记 5 条，其中含 logrotate 残值） |
+| **v2.9** | 2026-09-17 | **第四轮定点复核的三条同型回归 + 护栏立项**：① 账本更正（上行的「6 清单」→ 13，并补指针）② `tests/test_registry.py` 从 `[T0]` 改标 **`[T3]`**（`core/registry.py` 是 T3 产出，T0 无被测对象；原并列写法会被读成"越界/空壳/红"三解）③ `config/server.toml` 的 `data_dir` 注释「开发态可覆盖」改为「改本文件即可（无 env/CLI 覆盖）」，与 §13.1 单源口径对齐 ④ **新增 §14：`scripts/refcheck.py` 立项**（三类机械检查 + 豁免表 + 负例自测要求），把四轮来的"改 A 没回扫 B"从人眼核对改为机器红/绿 |
+
+---
+
+## 10.（v2.1 追加）模块化骨架 —— 吸收决策人 whale-moe 项目的排版章法（ADR-006）
+
+> 决策人要求：参考其 whale-moe 项目的实践（`console/modules/` 一块=一目录、`agent/widgets` 加功能=加文件、bridge 单通道、壳/内容分离）+ DSH「一切皆插件」模式，追求**强可扩展、低耦合、块状叠加**。本章取代 §2 的旧目录树成为组织真值；数据契约（§3）、判定契约（§4）、选题契约（§5）、验收门（§6）**全部不变**。
+
+### 10.1 决策人项目的 8 条章法 → 本项目落法
+
+| 章法（whale-moe 源码实证） | 本项目落法 |
+|---|---|
+| 块 = 自包含目录（`console/modules/appearance/` = module.py + page.html） | **模块 = `modules/<name>/` 目录**：module.py（接线）+ page.html（如有 UI）+ MANIFEST + 自述 + 自测 |
+| 加功能=加文件骨架零改动（`agent/widgets/base.py` 基类 + `WIDGETS=[MyWidget()]`） | **加功能 = 加一个目录 + 启停表勾一行**；启停表决定显隐（隐藏 classroom 就是改这里，不改内核） |
+| 扩展配方 = README 一等章节（「🧩 开发：加一个小组件」写明新文件自动获得的接线） | `docs/MODULE_TEMPLATE.md`——「加一个模块」配方，与你的 🧩 节同骨 |
+| bridge = 唯一跨界通道（control_api.py：静态资源原路径 + 127.0.0.1 JSON API，mutating 入队） | `bridge/api.py` 唯一进出通道；写操作过 token 门 + rate-limit |
+| 壳与内容分离（shell/ ≠ console/ ≠ agent/） | `web/`（前端壳）‖ `core/`（命脉）‖ `modules/`（功能）‖ `generators/`（题源）四分 |
+| 域内再分层（agent/memory = store/retriever/extractor/embeddings） | scheduler 域内同姿势拆分（P2a）：state / due 算术 / picker / migrate 四件套 |
+| patches/ 与 references/ 隔离位 | 同名采纳（fork 上游补丁留痕 + 调研材料隔离） |
+| THIRD_PARTY_NOTICES.md 单独成文 | 直接采纳（正好承我们的 GPL/AGPL 传染红线） |
+
+### 10.A 三条铁律
+
+1. **单向依赖**：`module → core` 允许，`core → module` 禁止。core 只认 MANIFEST 不认模块名——启动由 registry 扫描装载。纪律由 `tests/test_dep_rules.py` 机械化执行（依赖方向违规 => 测试红）
+2. **块内自治**：每模块 = 逻辑 + UI 如有 + 清单 + 自述 + 自己的测试；跨模块通信只有两种合法姿势（调 core 契约 / registry 事件表）
+3. **命脉不插件化**：HTTP 服务、存储持久化、判定契约仲裁进 core——不可替换、不可插件（N3 属于内核不属于功能面）
+
+### 10.B 仓库骨架 v2.1（**SUPERSEDED（v2.5）→ 见 §11.9 真值树**；仅留演进对照，禁止照此搭骨架）
+
+> ⚠️ 与 §2 同待遇：本节自 v2.5 起降级为演进留档，**唯一真值树是 §11.9**。
+
+```text
+math-drill/
+├── core/                          # 命脉，极薄
+│   （无 server.py —— 进程入口 = bridge/api.py，见 §11.9 与 ADR-010）
+│   ├── registry.py                # scanners: modules/ generators/ MANIFEST 校验
+│   ├── store.py                   # blob 读写+版本仲裁（ADR-002）
+│   └── judge.py                   # fail-closed 判定器（ADR-003）
+├── modules/                       # 一切功能
+│   ├── practice/                  # 答题会话（judge 客户端逻辑+记录）
+│   ├── daily/                     # 每日任务单（首建锁定）
+│   ├── review/                    # [P2a] SM-2/kp_state（含迁移）
+│   ├── picker/                    # [P2b] 时间衰减选题器（测试先行）
+│   ├── report/                    # [P3] 周度薄弱报告
+│   ├── vault_export/              # [P3] 错题→Obsidian vault
+│   ├── explain_llm/               # [P5] 讲解（客户端直连，服务端零代理）
+│   ├── gamifier/                  # game.js 的服务端配套（默认启用）
+│   └── classroom/                 # [P5, enabled=false] 隐藏入口
+│      （每处 MANIFEST: name/phase/routes/tables/deps/enabled）
+├── generators/                    # 插件第二现场：题源
+│   ├── linalg_det/ … linalg_quad/ # 线代 Ch1-6（linalg-drill 产线并入）
+│   ├── custom_json/               # 外部题源（兼容基底 customQ 格式）
+│   └── textbook_import/           # [远期] 教材课后题管道
+│      （每生成器 = 逻辑 + MANIFEST + 自述 + 自测）
+├── web/                           # 前端壳（fork；你的 shell/ 语义）
+│   ├── pages/                     # fork js 按功能块挂载
+│   ├── assets/
+│   └── js/api.js                  # 唯一新增接线：blob 同步桥 + judge 客户端
+├── bridge/                        # 你的 bridge/ 章
+│   └── api.py                     # web↔core 控制 API：token 门/限速/队列化写
+├── contracts/                     # 跨块契约唯一真相源
+│   ├── answer_types.py            # answer_type 枚举与结构（纯声明）
+│   ├── events.md                  # registry 事件名注册表
+│   └── blob_merge.md              # 合并规则真值（§3.5 移入）
+├── tests/                         # 每模块同目录自测 + 跨块集中测试
+│   ├── test_judge.py / test_store.py / test_api.py
+│   ├── test_dep_rules.py          # 铁律 1 的机械执行者
+│   └── test_picker.py             # [P2b 先写] §5 六条
+├── scripts/                       # gen_bundles / db_init / backup_check
+├── deploy/                        # systemd / caddy.block / backup.timer
+├── docs/                          # ARCHITECTURE / JUDGE / DECISIONS / BOUNDARY
+│   └── MODULE_TEMPLATE.md         # 「加一个模块」配方（同你的 🧩 会话甸）
+├── patches/                       # fork 上游补丁留痕（你的 patches/ 章）
+├── references/                    # 隔离位（调研/第三方材料）
+├── data/  .gitignore
+├── LICENSE / ATTRIBUTION
+└── THIRD_PARTY_NOTICES.md         # 合规单（重申真题库数据永不入开源仓）
+```
+
+### 10.C 「加一个模块」四件套（配方骨架，P1 落地时按此填）
+
+同你的 `base.py + WIDGETS=[...]` 姿势：
+1. **MANIFEST**（声明单）：`name`（全局唯一）/ `phase` / `routes[]` / `tables[]` / `deps[]`（只许 core + events）/ `enabled`
+2. **module.py**：注册路由；两个回调（`on_request` / `on_schedule`），用不到的显式声明无声回调
+3. **自述 + 自测**：README.md + `tests/modules/<name>/`
+4. **启停表**：`config/modules.toml` 默认开关（⚠️ v2.1 原文写 `.yaml` 与 ADR-005「全仓禁 YAML」冲突，v2.5 更正；`config/` 目录已补入 §11.9 真值树）——隐藏 classroom 时改这里，不改内核
+
+### 10.D 生成器作为插件（题源第一现场）
+
+- 输入 `{chapter, params, seed}` → 输出**稳定题目对象**（§3.1 字段含 `gen_params` 快照）
+- **可复现门**：同输入含 seed 同输出——错题重练的前提
+- 打包：`scripts/gen_bundles.py` 扫描 generators/ → `data/bundle-vN.json` → 部署灌 question 表
+- **合规红线（第三次重申）**：一切真题源的 generator 令牌**只允许个人使用**，永不进开源仓库
+- 修正：§5 选题契约的代码归属由 server/Modules/scheduler.py 改为 `modules/picker/`（测试仍挂 tests/test_picker.py）
+
+
+---
+
+## 11.（v2.2 追加）质检官三条地基石的裁决 —— P1/P2/P3 定案
+
+> 质检官（冷启动复核）判定：八条章法全部为真、零代码属实、但**暂缓立骨架**直到三块地基石答完。本节即答案。裁决完成后仓库树以本节为准（**合并后的唯一真值树在 §11.9**——v2.2 初稿误写为「§11.4」，该节实为依赖矩阵）。
+
+### 11.1 P1 · 唯一存量资产程序归属 —— **答：core 增第 5 命脉，`core/exact/`**
+
+- **裁决**：`exact.py` 归入 **core 第 5 项**（`core/exact/`，package 存量 `drill/exact.py` P1 脚手架时迁入）。判据引用我们自己的铁律 3 原文：**「判定正确性属于内核」**——而 exact 正是让判定「精确」的那部分（det/rank/rref 供判定与生成共用），它就是命脉，按质检官的论证闭环。
+- **一句话回答**：**生成器经 core 唯一导出面取得精确算术——`from core.exact import ...`；`generators → core` 这条边合法。**
+- 否决掉的另两路（含代价，承接质检官论证）：塞进某个 generator ⇒ 制造 generator 横向依赖，恰是承诺不存在的边；每 generator 带副本 ⇒ 多份真值，给 N3 开缝（与 ADR-006「命脉不做可替换件」正面互斥）。
+- 连带：旧 §2 的 `math/` 顶级域与 §10.B 的悬空引用一并修正（**真值树见 §11.9**）。
+
+### 11.2 P2 · 配置格式 stdlib 化 —— **答：TOML（tomllib）为配置、JSON 为清单；YAML 全仓禁用**
+
+- **实测证据（质检官无法登机、我方补的）**：服务器 Python 3.12.3 实跑三连——`tomllib: OK (stdlib)` / `yaml: 存在（系统级安装）/ version 3.12.3`
+- **校准质检官的「部署必炸」**：在当前服务器上 yaml 恰好**在**（Ubuntu 24.04 系统附带），所以「当场炸」不成立。但质检官推理的骨架是对的：**yaml 的存在是环境随机产物**（换发行版/镜像即消失），依赖它=依赖运气。纪律不变：**全仓禁止 import yaml；若 import 必须进 deploy 说明并显式钉版**。
+- 定案：
+  - 模块清单 `MANIFEST` = **`manifest.json`**（stdlib json 解析；人类注释写进模块 README，不塞清单文件）
+  - 启停表 = **`config/modules.toml`**（tomllib 只读解析，3.11+ stdlib；开发机 3.12.13 / 3.14.7 与服务器 3.12.3 双绿已验证）
+  - `manifest` 的 schema 校验由 registry 启动时做 + `tests/test_dep_rules.py` 固化——格式错误启动即红，不给静默
+
+### 11.3 P3 · 单一真相源的边界 —— **答：kp_state 是 blob 的段；MANIFEST 的 `tables[]` 删除**
+
+- **裁决**：blob 持有**一切客户端自有状态**（cards/daily/settings/checkins/game/notes/**kp_state**）；`modules/review` 的 kp_state 是 blob 里的段，**不是 sqlite 表**。质检官给的二选一按「段」答——ADR-002 **无需重开**，§3.5 合并规则 **无需重写**。
+- **连带修正（质检官连带揪出的真矛盾，必须写明）**：`attempts` 在 blob 合并规则 v1 表里是「append-only」——但这与「服务端 judge 独占写入事实日志」口径冲突（客户端可带病提交 attempts 数组）。**v2.2 修订：attempts 从 blob 合并规则中退役**——blob 是客户端视图（retained 为 UI 快照），**服务端 `attempts` 表为唯一事实源**（append-only，按 id 幂等并入；judge 是唯一写入者）。blob 与日志分歧以日志为准。这把「单源」语义从姿势性表述变成了可测边界。
+- **MANIFEST 变更**：`tables[]` 删除，**改为 `blob_fields[]`**（声明模块读写的 blob 段名，供启停审计与 P2a 迁移扫描用）。
+- **P2a 迁移形状（答质检官悬空问）**：**blob 内键迁移**——旧 `state.cards{kid 与 card.id 混键}` 迁为 `state.kp_state{kid}` 单键段；迁移器对 blob 只做纯函数变换（同引用可回滚），不触碰表。
+
+### 11.4 允许依赖矩阵（6×6，落 `contracts/dep_matrix.toml`，`test_dep_rules.py` 读表执法）
+
+| 域 ＼ 域 | core | modules | generators | bridge | contracts | web |
+|---|---|---|---|---|---|---|
+| **core** | — | ✗ | ✗ | ✗ | **✓** | ✗ |
+| **modules** | ✓ | ✗（走事件） | ✗ | ✗ | ✓ | ✗ |
+| **generators** | ✓ | ✗ | ✗（同侪经公共算子） | ✗ | ✓ | ✗ |
+| **bridge** | ✓ | ✗ | ✗ | — | ✓ | ✗ |
+| **contracts** | ✗（纯数据叶，被所有人只读依赖） | | | | — | |
+| **web** | ✗（前端只经 bridge 的 HTTP 面） | ✗ | ✗ | ✓ | ✓ | |
+
+> 注：`contracts` 是**被依赖的数据叶**——`core / modules / generators / bridge / web` 五域均可只读依赖它（列全 ✓），**它自身零依赖**。⚠️ v2.2 初稿把 core 行这一格误标为 ✗，与 T1（`core/judge.py` 必须 import `contracts/answer_types.py`）直接冲突，v2.5 已修正。另：「generators→modules 横向边」为 P1 否决项，**显式焊死为 ✗**。
+
+### 11.4.1 装载豁免（回应复核 B5 —— 依赖纪律与激活器的接缝）
+
+**规则**（可机械执行，`test_dep_rules.py` 据此实现）：
+
+| 允许 | 禁止 |
+|---|---|
+| `core` 的**静态** import：标准库 + `core.*` + `contracts.*` | `core` 静态 import `modules.*` / `bridge.*` / `generators.*` |
+| **唯一豁免**：`core/registry.py` 内的**动态装载**（运行时按清单发现并载入 bundle） | 任何其它文件出现动态装载 |
+| `modules/generators` 静态 import：标准库 + `core.*` + `contracts.*` | `modules` ↔ `modules`、`generators` ↔ `modules`、`modules → bridge`、`modules → web` |
+| `bridge` 静态 import：标准库 + `core.*` + `contracts.*` | `bridge → modules`（模块靠 registry 装载，不靠 import） |
+
+**`test_dep_rules.py` 的三项检查**：
+1. **AST 扫描**：解析每个 `.py` 的顶层与函数内 `import`/`from ... import`，按上表比对（`load_bundles()` 的动态路径除外）。
+2. **单点检查**：`grep -rn "importlib" core/ modules/ bridge/ generators/` 只允许命中 `core/registry.py`。
+3. **清单对齐**：动态载入的路径必须逐个出自 `manifest.json` 声明（不允许硬编码模块名）。
+
+> 这条豁免是**必要的**：激活器与依赖纪律天然打架（复核 B5 指出）。写死才有测试可写。
+
+### 11.5 路由权威与权限门的落位（质检官 S2 定案）
+
+- **HTTP 面唯一持有者 = `bridge/api.py`**，且**它就是进程入口**（`python3 -m bridge.api`）。对齐决策人 whale-moe 的 `bridge/control_api.py` 章（一台轻服务器 = 静态资源 + JSON API）。**原 v2.2 的 `core/server.py` 已从树中删除**——它会造成 `core→bridge` 违规边（ADR-010）。`core/registry.py` 仍是被 bridge 调用的装载器。
+- **MANIFEST 不再声明 routes**（撤回 v2.1 §10.C#2 的「注册路由」表述），模块只声明回调 `rpc[]`（函数名清单）；bridge 统一以 **`/m/<module>/<rpc>`** 挂载；**bridge 自有端点恰好三个**：`/api/state`、`/api/judge`、`/api/daily`（⚠️ 原「固定四个」为笔误；§1 图中的 `/api/questions` 是**离线打包路径**，非运行时端点——已修正）。
+- **引导端点 `/setup` 是唯一不过 token 门的入口**（v2.7 补，回应复核 B2）：它就是「换取凭证」的入口，若也过 token 门则永远拿不到 cookie（部署死锁）。它只受 §13.3 的独立限速，不参与统一过滤器；上一句的「恰好三个」专指 `/api/*` 自有端点，**不含 `/setup`**。
+- **安全后果（质检官警告的正解）**：全部 `/m/*` 与 `/api/*` 经 **bridge 单点 token 门 + rate-limit**——test_api.py 现在可以写了（单一过滤器；**唯一例外见上一条**）。
+
+### 11.6 文档卫生定案（S3 中三条 + 一行级全收）
+
+| 项 | 定案 |
+|---|---|
+| §2 双真相源 | 已加 SUPERSEDED 横幅（见 §2 顶部） |
+| 模块自测位置互斥 | 定案：**`modules/<name>/tests/`**（同目录法）；registry 扫描时跳过 tests/ 与 docs/；`tests/` 顶层只放跨块契约测试 |
+| events 执法挂点 | 定案：`contracts/events.py`（枚举）为唯一真值 + `events.md` 仅人话注解；事件改名走 `test_dep_rules.py` 红灯（拼错=导入点不存在=红） |
+| 日期 | 统一纠正为 2026-09-17（v2/v2.1/v2.2） |
+| 解释器矩阵 | **目标**：服务器 3.12.3（部署面）；**开发**：3.12.13 / 3.14.7（CI 面）。骨架要求所有测试在两栏解释器下双绿（质检官已在 3.12.13 首证，我方补 3.14.7 存量真值 = 30 断言） |
+| 「个险 duration」 | 已改：「state / due 算术 / picker / migrate 四件套」 |
+| whale-moe 双副本 | 实测**仅一副本**（`math-practice-survey/clones/whale-moe`，mtime 09-17 16:18，207 文件）；`_whale-moe-ref` 在本环境不存在（或为质检者自身环境的另名副本）——锚点以本路径为准，其它环境副本不作证据 |
+| 30/1,320 断言精度 | 采纳质检官口径：「30 是 check() 调用点（自建断言器），聚合循环实跑 ≈1,320 组随机样本」——比「30 项断言」更精确，文档措辞升级 |
+
+### 11.7 质检官「无法判断」三条的闭环记录
+
+| 项 | 质检管状态 | 我方闭环 |
+|---|---|---|
+| 服务器 3.12.3 | 登不了机 | **SSH 实跑三连**：3.12.3 ✓ / tomllib ✓ / yaml 存在（但纪律不用） |
+| 评审原文转录忠实度（含 10/10 复验表） | 不可读 | 原件在 `adaptive-practice-survey/评审对齐-执行清单v2.md`（§A 复验记录表）——按需开放读取权限即可 |
+| 🧩 节「三重接线」细节 | 只核到标题 | 我方当时的阅读证据：README.md「开发：加一个小组件」节原文——「一个小组件就是一个文件…自动获得：语音工具（LLM 可调用）+ Web 面板卡片 + 桌宠联动」——内容级为真，非粉饰 |
+
+### 11.8 对「暂缓立骨架」的响应
+
+**同意暂缓，且与决策人「规划期不写代码」的指令同向。** P1/P2/P3 的三个答案（§11.1-11.3）已把目录形状的三个变数钉死；**§11.9 真值树**（＝§10.B + 本节五处修正的合并结果）可以作为**唯一真值树**被质检官依其承诺复跑全契约一致性。质检官内建「第二意见 agent」可选——建议待 v2.2 复核时若有分歧，再一并挂。
+
+
+### 11.9 v2.5 真值树（唯一可执行目录树 —— 回应复核 B1）
+
+> 背景：v2.2 只写了「§10.B + 五处修正」的**增量描述**，从未落成一张合并后的树，导致 T0 的验收标准不可执行。
+> 本节即**合并后的唯一真值树**；§10.B（v2.1 树）与 §2（旧树）均自此降级为演进留档。
+
+```text
+math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_BRIEF §0.6）
+├── core/                          # 命脉，极薄；不含 HTTP（被 bridge 调用）
+│   ├── registry.py                # 清单扫描与装载（★ 全仓唯一的动态装载点，豁免见 §11.4.1）
+│   ├── store.py                   # blob 读写 + 版本仲裁（ADR-002）；**建表与 `schema_version` 迁移的唯一归属**（铁律 3：持久层在 core，模块不建表——v2.8 回应清单③）
+│   ├── judge.py                   # fail-closed 判定器（ADR-003 / JUDGE_CONTRACT）
+│   └── exact/                     # ★ 第 5 命脉：精确算术（原型 drill/exact.py 迁入；T0.5 执行）
+│       ├── __init__.py            # ★ 导出面：`from core.exact import det, rank, rref, ...`（P1 钦定的调用形式；v2.8 实测：无此文件该 import 报 ImportError）
+│       ├── exact.py
+│       └── README.md
+├── bridge/
+│   └── api.py                     # ★ 进程入口（python3 -m bridge.api）：HTTP 唯一持有者
+│                                  #   （token 门 + rate-limit + 挂载 /m/* 与三个 /api/*）
+├── modules/                       # 一切功能：每处 = manifest.json + module.py + [page.html] + README.md + tests/
+│   ├── practice/                  # [P1] 答题会话
+│   ├── daily/                     # [P1] 每日任务单
+│   ├── gamifier/                  # [P1] 游戏化（承接 game.js 配置）
+│   ├── review/                    # [P2a] SM-2 + kp_state 迁移
+│   ├── picker/                    # [P2b] 时间衰减选题（测试先行）
+│   ├── report/                    # [P3] 周度薄弱报告
+│   ├── vault_export/              # [P3] 错题 → Obsidian vault
+│   ├── explain_llm/               # [P5] 讲解通道（客户端直连，服务端零代理）
+│   └── classroom/                 # [P5] enabled=false（D3）
+├── generators/                    # 题源插件：每处 = manifest.json + 生成逻辑 + README.md + tests/
+│   ├── linalg_det/                # [P1] 线代 Ch1 行列式（Phase 1 唯一题源，见 T6/M6）
+│   ├── linalg_mat/ … linalg_quad/ # [P4] Ch2-Ch6 —— Phase 1 **不预建**这些目录（T0 只建已列出的 linalg_det / custom_json / textbook_import），P4 按需新增（v2.8 消解省略号歧义）
+│   ├── custom_json/               # 外部题源（兼容基底 customQ 格式）
+│   └── textbook_import/           # [远期]
+├── contracts/                     # 跨域契约真值（数据叶，五域只读依赖；自身零依赖）
+│   ├── answer_types.py            # answer_type 枚举（JUDGE_CONTRACT §2 的机器可读化）
+│   ├── events.py                  # 事件名枚举（唯一真值）
+│   ├── dep_matrix.toml            # 6×6 允许依赖矩阵（test_dep_rules 读它执法）
+│   └── blob_merge.md              # blob 合并规则真值（ADR-002/007）
+├── config/
+│   ├── modules.toml               # 启停表（tomllib 只读；全仓禁 YAML）
+│   ├── server.toml                # ★ 运行时常量真值（§13.1：绑定/端口/cookie TTL/限速/data_dir/τ）
+│   └── server.example.toml        # 对照样例（随仓提交；**不含任何凭据**）
+├── web/                           # ★ 静态根（bridge 只服务这个目录，见 §13.2）
+│   ├── index.html                 # ★ 入口页（fork 的 index.html；T4 在此加同步状态、隐藏 classroom 入口）
+│   ├── js/                        # fork 的 js（app.js/engine.js/…）+ ★ api.js（唯一新增接线：存储桥 + judge 客户端）
+│   ├── assets/                    # css / 图标 / 字体
+│   └── tests/                     # node 测试落点（D6；run-all.js 按 __dirname 扫描 test-*.js）
+│                                  #   ⚠️ bridge 必须拒绝暴露 web/tests/** 与 dotfile
+├── tests/                         # 跨域与内核测试（unittest）
+│   ├── test_exact.py              # 原型迁移后落此（T0.5）
+│   ├── test_judge.py              # [T1] 10 例回归 + 6 例边界 + 性质测试
+│   ├── test_store.py  test_api.py # [T2/T3]
+│   ├── test_dep_rules.py          # [T0] 依赖纪律 §11.4.1 三项检查
+│   ├── test_registry.py           # [T3] MANIFEST 校验与装载（被测对象 `core/registry.py` 是 T3 产出；T0 建骨架，v2.9 改标——原标 [T0] 会造成"越界/空壳/红"三解）
+│   └── test_picker.py             # [P2b 先写]
+├── scripts/                       # gen_bundles.py（打包 bundle）· db_init.py（**建表 + schema_version + 灌 bundle**，T7 部署前置）· backup_check.sh · refcheck.py（**文档自洽护栏，规格见 §14**）
+├── deploy/                        # math-drill.service / caddy.block / backup.timer / logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
+├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE
+│                                  #   / MODULE_TEMPLATE / IMPLEMENTATION_BRIEF / DECISIONS
+├── data/                          # 运行时数据（.gitignore：data/、*.db、*.db-wal）
+├── references/                    # 调研/对拍留档（含版权样本）——**.gitignore 排除，不入版本控制**（与 data/ 同待遇，v2.8 消解与 H8「版权数据零入仓」的冲突；不进仓库即不进远端）
+├── patches/                       # fork 上游补丁留痕（ADR-006 / §10.1；Phase 1 为空占位目录）
+├── README.md  LICENSE  ATTRIBUTION  THIRD_PARTY_NOTICES.md  .gitignore
+```
+
+**树的三条纪律**（施工时不得自行增删顶层域）：
+1. 顶层域固定为 `core / bridge / modules / generators / contracts / config / web / tests / scripts / deploy / docs / data / references / patches` + 若干仓库文件（v2.8 补 `data/`——它在树里但原清单漏列）。
+2. 新增功能一律落在 `modules/`；新增题源一律落在 `generators/`；**不得新增顶层域**。
+3. `web/tests/` 是 node 测试的唯一落点（`run-all.js` 用 `__dirname` 扫描，搬迁必须整目录）。
+
+**上游 pin（v2.7 补，回应复核 C-2）**：`web/` 的内容来自 fork **`111wukong/kaoyan-math-tutor`（MIT）@ `82c014479f712a88b43fc147ab92d824c0ccc784`（master, 2026-09-14）**。
+T5 的「511 项全绿」基线即该 commit 的实测值（复核者本机复跑：工作区洁净、`node tests/run-all.js` → 511 项全通过）。
+clone 后删 `.git`（上游以 `ATTRIBUTION` 声明，见 `IMPLEMENTATION_BRIEF §0.6`）；**上游漂移不自动跟随**——升级 commit 须更新 `ATTRIBUTION` 并重跑 T5。
+
+
+---
+
+## 12.（v2.5 追加）部署规格（回应复核 B6：T7 原先指向不存在的 §3.6）
+
+> 目标主机：腾讯云轻量 `101.43.18.37`（Ubuntu 24.04 / 4C / 3.6G / 27G 可用 / Python 3.12.3 实测）
+> 前提：该主机已有 Caddy(Docker) + CouchDB + dsh-web 在跑 —— **本项目的部署只允许「追加」，不得改动既有服务**
+
+### 12.1 systemd 单元（`deploy/math-drill.service`）
+
+| 字段 | 值 | 理由 |
+|---|---|---|
+| `User` / `Group` | `math-drill`（专用系统用户，非 root、非 reader） | 最小权限 |
+| `WorkingDirectory` | `/opt/math-drill` | 与既有项目分离 |
+| `ExecStart` | `/usr/bin/python3 -m bridge.api` | ★ 入口 = bridge（ADR-010）。**不带绑定类参数**——绑定/端口只有 `config/server.toml` 一个真源（v2.8 回应复核阻塞1；原写 `--host 127.0.0.1 --port 8081` 与 §13.1 构成双源） |
+| `Environment` | `PYTHONUNBUFFERED=1`、`MATH_DRILL_TOKEN_FILE=/etc/math-drill/token` | 日志实时；**token 路径必须在此注入**（缺失/空 → 拒启，见 §13.1/§13.3②）。数据目录**不用 env**——单源在 `config/server.toml` 的 `data_dir`（v2.7，回应 B3a/B3c） |
+| `Restart` / `RestartSec` | `on-failure` / `5` | 对齐既有 `dsh-web.service` 习惯 |
+| `NoNewPrivileges` | `true` | 对齐既有服务加固 |
+| `PrivateTmp` | `true` | 同上 |
+| `ProtectSystem` / `ReadWritePaths` | `strict` / `/var/lib/math-drill` | 只允许写数据目录 |
+| `StateDirectory` | `math-drill` | systemd 自动创建 `/var/lib/math-drill`（属主与权限正确）并从 `ProtectSystem` 效果中豁免——**不要手工 `mkdir`**（v2.7 补，回应 B3d） |
+| `StandardOutput`/`Error` | `append:/var/log/math-drill.log` | 单文件日志；**必须同时部署 logrotate 片段**（否则无限增长）。与 `ProtectSystem=strict` 不冲突，理由见注①。⚠️ 该片段**必须用 `copytruncate`**（或轮转后重启服务）：日志是 fd 继承写入，默认 `create` 式轮转会让进程继续写已改名的旧 inode，**新日志静默不增长**（v2.8 补，回应清单⑧） |
+
+**强制**：只绑 `127.0.0.1:8081`，**绝不绑 `0.0.0.0`**（公网面只由 Caddy 提供）。
+
+> **注①（v2.7，复核实测澄清——驳回复核 B3b）**：`append:` 指定的日志文件**由 PID 1（service manager）在单元命名空间之外打开**，因此 `ProtectSystem=strict` **不影响**它。依据 `man 5 systemd.exec` 原文："the target path is opened by the service manager before the executable is invoked … The resulting descriptor is then inherited … into the unit's own domain."
+> 该结论成立的前提是**日志只经 stdout/stderr 走 fd 继承**；若将来应用自行 `open()` 写日志文件，才需要 `LogsDirectory=math-drill`（该设置会自动从 `ProtectSystem` 效果中豁免）或把路径加进 `ReadWritePaths=`。
+> **注②**：`data_dir` 单源在 `config/server.toml`；systemd **不再**注入 `MATH_DRILL_DATA`（v2.6 的双源于 v2.7 消除）。
+
+### 12.2 Caddy 站点块（`deploy/caddy.block`，**追加**到 `/root/obsidian-livesync/Caddyfile`）
+
+按既有文件同构写法。**实测（2026-09-17，复核者登机只读核查）**：Caddy 是 **Docker 容器 `caddy-for-ols`**（compose 服务名 `caddy`，镜像 `caddy-cloudflare:2.11.4`；宿主**没有** caddy systemd 单元，`systemctl is-active caddy` = inactive）；Caddyfile 确在 `/root/obsidian-livesync/Caddyfile`；既有两块是 `obsidian.zhu2006.xyz`（纯 `reverse_proxy`，**无 `tls` 块**）与 `reader.zhu2006.xyz`（**有** `tls { dns cloudflare {env.CLOUDFLARE_API_TOKEN} }`）。⇒ **math 块照 `reader.*` 写，别照 `obsidian.*`**（原文"同用 DNS-01"只对了一半）：
+
+```
+math.zhu2006.xyz {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+    reverse_proxy 127.0.0.1:8081
+}
+```
+
+**操作纪律**：① 改前 `cp Caddyfile Caddyfile.bak-<date>` **并记录原文件 `sha256sum`**（用于回滚校验，见 §12.4⑩）（该目录已 git 化，改动可回滚）② 只追加，不动 `obsidian.*` / `reader.*` 两块 ③ **先 validate 再 reload**：`docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile` 绿了，才执行 `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile` ④ **只准**上面的 `caddy reload` 或 `docker restart <caddy 容器名>`；**禁止 `docker compose up -d` / `docker compose restart` 一类全栈操作**（可能连带重建 CouchDB / dsh-web 容器，直接违反「不得改动既有服务」）⑤ 失败立刻回滚备份。
+**DNS（决策人手动）**：Cloudflare 加 `math.zhu2006.xyz` A 记录 → `101.43.18.37`，**DNS only（灰云）**（与既有规范一致，避免 CF 代理干扰）。
+
+### 12.3 备份与自检（`deploy/backup.timer` + `scripts/backup_check.sh`）
+
+| 项 | 规格 |
+|---|---|
+| 频率 | 每日一次（避开整点） |
+| 动作 | `sqlite3 .backup` 到 `/var/backups/math-drill/` + `PRAGMA integrity_check` |
+| 保留 | 最近 7 份（轮转） |
+| 失败处理 | 退出码非 0 写日志（**不做告警推送**——决策人明确不要推送类功能） |
+
+### 12.4 部署验收（T7 的执行标准）
+
+```
+① systemctl status math-drill → active (running)（若此处就失败：先查 §12.1 注②与 `MATH_DRILL_TOKEN_FILE` 是否注入）
+② curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/state → 401（无 token 被拒，证 token 门生效）
+③ `/setup` 连续 4 次错误 token → 429（独立限速生效；语义见 §13.1 尾注）
+④ 经 `/setup?t=<token>` 拿到 cookie 后访问 → 200；手机浏览器打开 https://math.zhu2006.xyz → 做题 2 道
+⑤ 服务端：attempts 出现 2 行；systemctl restart → 数据仍在**且 cookie 仍有效**（派生式会话，重启不掉登录）
+⑥ 静态暴露面正确：`/tests/run-all.js` 与任一 dotfile → 均 403
+⑦ DNS：`dig +short math.zhu2006.xyz` → `101.43.18.37`（A 记录由决策人手动添加）
+⑧ **Caddy 改动可证伪**：`git diff` 显示 Caddyfile 为**纯追加**（0 删行、0 改行）——只多出一个站点块
+⑨ **既有服务未受影响**：`https://obsidian.<域名>/_up` 与 `https://reader.<域名>/` 各一次 `curl -s -o /dev/null -w '%{http_code}'` → 均 200（**必须走 https 公网面，不许只打本地端口或 http**）
+⑩ 回滚可证：改前记录的 Caddyfile `sha256sum` 与备份文件一致（未回滚时以 ⑧ 的 diff 作为"只追加"证据）
+⑪ 备份链路：`systemctl list-timers` 对照（既有 timer 未变）+ 手动触发一次 `backup_check.sh` → 退出码 0 且 `/var/backups/math-drill/` 出现新文件
+⑪b 日志轮转生效：`logrotate -d /etc/logrotate.d/math-drill` 干跑无错，且片段含 **`copytruncate`**；轮转一次后新日志仍在增长（`ls -l` 前后对比，v2.8 补清单⑧）
+⑫ 证据留档：上述全部命令输出
+```
+
+
+---
+
+## 13.（v2.6 追加）配置与凭据落点（回应复核第二轮「新缺口 1/2」）
+
+> 背景：v1 树里的 `server/config.py` 随树废弃后无人接替，导致「τ 默认 10 天(config)」悬空；
+> 且 token 的**签发与存放全仓无定义**，而 H7 禁止入仓、T3 与 §12.4② 又都要求 token 门生效——
+> 执行方到 T3 只能自行发明，属设计层决定，故在此定案。
+
+### 13.1 常量与凭据的分家
+
+| 类别 | 落点 | 是否入仓 | 说明 |
+|---|---|---|---|
+| **运行时常量**（绑定地址/端口、cookie 名与 TTL、限速参数、数据目录、τ） | **`config/server.toml`** | ✅ **随仓库提交**（非机密） | 由 `bridge/api.py` 启动时读取（tomllib）；另备 `config/server.example.toml` 供对照。**绑定类参数无 CLI / env 覆盖**（单源：`bind_host` / `port` / `data_dir` 一律以 toml 为准；systemd 单元不带参数，见 §12.1） |
+| **访问 token** | **`/etc/math-drill/token`**（`chmod 600`，属主 `math-drill`） | ⛔ **绝不入仓**（H7） | 路径经 systemd `Environment=MATH_DRILL_TOKEN_FILE=...` 注入；**文件缺失或为空 → 进程拒绝启动**（不设默认 token） |
+| **LLM key** | 客户端 localStorage（用户自持） | ⛔ 绝不入仓 | 服务端不代理、不存储（`explain_llm` 红线） |
+
+`config/server.toml` 字段（契约，实现按此读）：
+
+```toml
+[server]
+bind_host = "127.0.0.1"          # 绝不改 0.0.0.0
+port = 8081
+static_root = "web"               # §13.2
+data_dir = "/var/lib/math-drill"  # 部署态；开发态就改本文件这一行（**无 env / CLI 覆盖**，见 §13.1 单源口径——v2.9 消歧）
+
+[auth]
+cookie_name = "md_session"
+cookie_ttl_days = 365
+token_file_env = "MATH_DRILL_TOKEN_FILE"
+
+[ratelimit]
+api_per_minute = 60          # /api/* 与 /m/*：每来源 IP 每分钟允许次数（整数）
+setup_max_failures = 3       # /setup：窗口内允许的**失败**次数（整数，不用 "3/hour" 这类字符串）
+setup_window_seconds = 3600  # 固定窗口长度
+
+[picker]
+tau_days = 10                     # 回应复核 M/D5：τ 的落点在此，非缺失的 server/config.py
+```
+
+> **限速语义（v2.7 补 / v2.8 按端点分域，回应复核 C-1 与清单⑥）**：① 计数键 = 来源 IP（N=1 单用户，不做全局计数）② 窗口 = 固定窗口 ③ **`/setup` 只计失败**——成功即清零，故窗口内第 4 次即使携带正确 token 也不会被拒（否则 NAT 邻居连坐、合法用户被自己锁死）④ 而 **`/api/*` 与 `/m/*` 的 `api_per_minute` 计的是全部请求**（不论成败）——这不是互斥而是分域：前者防爆破、后者防滥用 ⑤ 命中 429 后窗口内不再放行 ⑥ 进程重启清零（N=1 可接受，且不会造成锁死）⑦ 参数统一为整数 + 秒。
+
+### 13.2 静态根与暴露面
+
+| 路径 | 归属 | 规则 |
+|---|---|---|
+| `web/` | **静态根**（唯一） | bridge 只从此目录提供静态文件 |
+| `web/index.html` | 入口页 | `GET /` → 该文件 |
+| `web/js/**`、`web/assets/**` | 前端资源 | 直接映射（`/js/...`、`/assets/...`） |
+| `web/tests/**` | node 测试 | ⛔ **禁止对外暴露**（403）；同时对任何 dotfile 一律 403 |
+| `/api/state`、`/api/judge`、`/api/daily` | bridge 自有端点（三个） | 经 token 门 + 限速 |
+| `/m/<module>/<rpc>` | 模块 RPC（bridge 统一挂载） | 同上，无例外面 |
+| `/setup` | 一次性凭据入口 | ⚠️ **不过 token 门**（唯一例外——它就是换取凭证的入口）；见 §13.3，**独立限速** |
+
+### 13.3 Token 的签发、下发与轮换（T3/T7 的执行依据）
+
+```
+① 生成（部署时，一次）：openssl rand -hex 32 > /etc/math-drill/token
+                          chown math-drill:math-drill /etc/math-drill/token && chmod 600 该文件
+② 启动：systemd 注入 MATH_DRILL_TOKEN_FILE=/etc/math-drill/token → bridge 读取；缺失/空 → 拒绝启动
+③ 下发（客户端，一次）：浏览器打开 https://math.zhu2006.xyz/setup?t=<token>
+                        → 服务端 hmac.compare_digest 常数时间比对 token
+                        → 成功则 Set-Cookie: md_session=<派生会话值>; HttpOnly; Secure; SameSite=Strict; Max-Age=365d
+                          【派生会话值 = HMAC-SHA256(key=token, msg="md-session-v1")；其后每个请求由服务端重算并 compare_digest 校验】
+                        → 302 跳转 /  ；失败仅返回 401（不回显任何信息）
+④ 轮换：重新 ①，然后各设备重走 ③（token 变 ⇒ 派生值变 ⇒ **旧 cookie 自动失效**）
+⑤ 纪律：token 只出现在 ① 的本地命令与 ③ 的浏览器地址栏（一次性）；**不得写入任何文件、日志、git**
+        服务端日志对 `/setup` 只记「成功/失败 + 来源 IP」，**不记 token 值**
+```
+
+> **为什么是派生值而不是随机会话值（v2.7 定案，回应复核 B4）**：随机值要么存内存（重启即掉，且**轮换 token 不会使任何已发 cookie 失效**——④ 的安全性质不成立），要么落库（§3 无 sessions 表，新增表需走 ADR，与 ADR-007/铁律 3 的单源边界摩擦）。派生方案**零存储**：无表、无文件、重启不掉登录、轮换自动失效、可测（`hmac.compare_digest` 恒定时间）。N=1 单用户不需要按设备独立撤销；将来若要，再引入设备注册并写 ADR。
+
+**验收（T3 可测）**：无 cookie 访问 `/api/state` → 401；`/setup` 连续 4 次失败 → 429；
+带 cookie 访问 → 200；`GET /tests/run-all.js` → 403（静态暴露面正确）。
+
+> **静态面是否过 token 门（v2.8 写死，回应清单⑤）**：**不过门**。静态面（`/`、`/js/*`、`/assets/*`、`web/index.html`）**匿名可读**——因为验收预期的是 **403**（路径规则）而不是 401（鉴权失败）；若静态面也过门，`/tests/run-all.js` 就该返回 401，验收条自相矛盾。次序定死：**先路径合法性（越权路径 → 403），后鉴权（`/api/*`、`/m/*` 无 cookie → 401）**。数据 API 与模块 RPC 一律要 cookie。
+>
+> **T3 测试如何注入凭据（v2.8 补，回应清单⑦）**：H7 禁止把 token 写进夹具，而「缺失/空 → 拒启」又要求 T3 实测失败路径。唯一合规解——测试在临时目录生成一次性 token 文件，用 monkeypatch 把 `MATH_DRILL_TOKEN_FILE` 指向它（夹具里只出现路径与桩值，不出现真实 token）。必须覆盖三条：**环境变量缺失 → 拒启；文件为空 → 拒启；token 不匹配 → 401**。
+
+### 13.4 与其它约束的关系
+
+- **H7 不变**：凭据零入仓——本节把「零入仓」落成**可执行的存放路径 + 注入方式**，而非仅禁令。
+- **H1 不变**：读 TOML 用 stdlib `tomllib`（3.11+），dev 机 3.12.13/3.14.7 与服务器 3.12.3 均已实测可用。
+- **fail-closed 一致**：token 缺失拒绝启动、`/setup` 失败不回显、静态目录越权一律 403——三处都是「无法证明合法即拒绝」。
+
+---
+
+## 14.（v2.9 追加）文档自洽护栏：`scripts/refcheck.py`（立项规格）
+
+> 触发：四轮复核下来抓到的问题**没有一条是设计错**，全部是「改了 A 没回扫 B」——v2.6 两次、v2.7 两次、v2.8 两次，v2.9 这次是账本本身的数目自相矛盾。这类核对不该靠人眼，它是机械活。
+
+### 14.1 三类检查（缺一即不算完成）
+
+| 类 | 检查内容 | 抓什么 | 已知命中 |
+|---|---|---|---|
+| **C1 树 ↔ 契约双向映射** | **路径 token 的语法（v2.10 定死）**：反引号包裹 **且** 满足其一 —— (a) 以已知顶层域开头（`core/ bridge/ modules/ generators/ contracts/ config/ web/ tests/ scripts/ deploy/ docs/ data/ references/ patches/`，见 §11.9 纪律 1）(b) 仓库根文件（`README.md` / `LICENSE` / `ATTRIBUTION` / `THIRD_PARTY_NOTICES.md` / `.gitignore`）。每命中一条 ⇒ 必须在 §11.9 树里出现；反向：树里每个条目至少被引用一次 | 悬空引用 / 树外文件 | v2.6 `config/server.toml`；v2.8 `patches/`、`tests/test_registry.py` |
+| **C2 同值多定义** | **单源清单**（`bind_host` / `port` / `data_dir` / token 路径 / `cookie_name` / `cookie_ttl_days` / 限速参数 / 表名 / `schema_version` / 上游 pin sha / `/api/*` 端点集合）的**合法定义域只有 3 处**：① §13.1 的表 ② §11.9 树的注释 ③ `config/server.toml` / `server.example.toml` 样本。域外出现 → 红；域内两处**数值不一致** → 红；toml 样本行必须带可正则标记 `# 单源：<key>`（把"优先级声明"变成能 grep 到的短语） | 双真源 | v2.6 `data_dir`；v2.8 端口 |
+| **C3 文档自陈数字** | **声明式清单（v2.10 定死真值来源）**：① 「共 N 行」→ `wc -l docs/*.md` 合计 ② 「N 条清单 / N 项」→ 同批次 ADR 编号项计数（`DECISIONS.md` 对应小节）③ 测试基线 `511` → 在 fork 里实跑 `node web/tests/run-all.js` ④ 上游 pin sha → 在 fork 里 `git rev-parse HEAD` ⑤ 验收项数（§12.4 的 ①..⑫/⑪b）→ 逐条计数。任一不符 → 红 | 账本漂移 | v2.8「6 清单 vs 13 清单」；行数自陈 1724 vs 1744 |
+
+**豁免表（C1 必须内置）**：§2、§10.B、§9 变更记录、ADR 背景段里的历史旧名（`qa` 表名、`server/config.py`、`web/pages`、`core/server.py`、`config/modules.yaml`）；**规划期路径 `linalg-drill/**`**（`IMPLEMENTATION_BRIEF` §0.6/§1 用它指代"现行位置"，T0 迁移后即不存在——v2.10 加入，否则首跑当天报红）；以及**宿主态路径白名单**——`/etc/math-drill/**`、`/opt/math-drill`、`/var/lib/math-drill`、`/var/log/math-drill.log`、`/var/backups/math-drill/`、`/root/obsidian-livesync/Caddyfile`（这些本就不在仓库树里，不豁免首跑会被几十条假红淹没，第二次就没人跑了）。
+
+### 14.2 验收（T0 交付的一部分；负例优先）
+
+```
+① 正例：对当前 docs/ 跑出全绿（若红，先修文档再交付）
+② 负例（必须，缺此不算交付）：
+   fixture A：从树里删掉一个仍被引用的文件 → C1 必须红
+   fixture B：同一单源值写两处且无优先级声明 → C2 必须红
+   fixture C：把一个自陈数字改错（如 511 → 512）→ C3 必须红
+③ 回归集：三类各至少回放一条历史案例（上表"已知命中"列）
+```
+
+> 依据：v2.8 清单⑬的教训——**不能红的 checker 比没有更糟**，它给的是假绿。
+
+### 14.3 归属与调用时机
+
+- **归属**：`scripts/refcheck.py`（树内条目）；契约出处 = 本节；验收 = §14.2；零依赖（stdlib，双解释器下可跑）
+- **调用时机**：① 每次改完 `docs/` 之后 ② 每个 T 轮交付前（与 `tests/test_dep_rules.py` 同批）
+- **自指要求**：本节与树行必须互为出处——否则它第一个抓到的就是它自己

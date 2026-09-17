@@ -1,0 +1,7 @@
+{
+  "name": "vault_export",
+  "phase": "3",
+  "enabled": false,
+  "blob_fields": ["notes"],
+  "description": "错题 → Obsidian vault（Markdown，走既有管道）"
+}
