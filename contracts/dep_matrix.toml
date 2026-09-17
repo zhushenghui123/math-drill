@@ -1,1 +1,32 @@
-# contracts/dep_matrix.toml —— 6×6 允许依赖矩阵（ARCHITECTURE §11.4）；tests/test_dep_rules.py 读它执法
+# contracts/dep_matrix.toml —— 6×6 允许依赖矩阵（真值；docs/ARCHITECTURE.md §11.4）
+# tests/test_dep_rules.py 读本文件执法：行域 → 列域 是否允许静态 import
+# 取值：true = 允许；false = 禁止（"走事件"/"同侪经公共算子"同属禁止静态 import）
+
+[domains]
+list = ["core", "modules", "generators", "bridge", "contracts", "web"]
+
+[allow]
+# core：只许标准库 + core.* + contracts.*（静态）
+core        = { core = true, modules = false, generators = false, bridge = false, contracts = true,  web = false }
+# modules：core + contracts；模块之间走事件，不 import
+modules     = { core = true, modules = false, generators = false, bridge = false, contracts = true,  web = false }
+# generators：core + contracts；同侪经公共算子（经 core），不横向 import
+generators  = { core = true, modules = false, generators = false, bridge = false, contracts = true,  web = false }
+# bridge：core + contracts；模块靠 registry 动态装载，不 import
+bridge      = { core = true, modules = false, generators = false, bridge = true,  contracts = true,  web = false }
+# contracts：纯数据叶，自身零依赖
+contracts   = { core = false, modules = false, generators = false, bridge = false, contracts = true, web = false }
+# web：只经 bridge 的 HTTP 面（运行时无 import 关系，此处恒 false）
+web         = { core = false, modules = false, generators = false, bridge = false, contracts = false, web = false }
+
+[exemptions]
+# 全仓唯一的动态装载点（§11.4.1）：importlib 只允许出现在这个文件
+dynamic_loader = "core/registry.py"
+# 允许 import 的标准库白名单（H1：服务端零第三方依赖）
+stdlib_allow = [
+  "argparse", "dataclasses", "datetime", "enum", "fractions", "functools",
+  "hashlib", "hmac", "http", "importlib", "json", "logging", "math", "os",
+  "pathlib", "random", "re", "secrets", "shutil", "sqlite3", "socketserver",
+  "string", "subprocess", "sys", "tempfile", "threading", "time", "tomllib",
+  "types", "typing", "unicodedata", "unittest", "urllib", "uuid",
+]
