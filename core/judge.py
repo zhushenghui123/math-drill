@@ -55,6 +55,11 @@ def norm(s: str) -> str:
 
     注意：**不删除**词间空格（向量/矩阵靠空格分隔），只把空白串压成一个空格并去掉
     紧贴分隔符/运算符的空白。归一化必须幂等（性质测试 P2）。
+
+    与 fork（`web/js/engine.js` 的 `Judge.norm`）的**刻意差异**（不是漂移，正是要修的病根）：
+      ① 空白：fork 全删（`\\s+`→''）；我们压成一个空格——向量/矩阵靠空格分隔，全删就没法解析
+      ② 字母 `x`：fork 映射成 `*`（于是 "3x" 归一化后与 "3" 相同 → 假阳性）；我们**不映射**
+      ③ `^` 与 `*`：fork 在比较前把它们删掉（于是 "1^2" 与 "1" 相同 → 假阳性）；我们**不删**
     """
     if not isinstance(s, str):
         raise JudgeError(ErrorCode.MALFORMED_REQUEST, "raw_answer/canonical 必须是字符串")
@@ -82,26 +87,26 @@ def norm(s: str) -> str:
 
 # ---------------------------------------------------------------- 类型解析
 
-_RATIONAL_RE = re.compile(r"[+-]?(?:\d+/\d+|\d+\.\d*|\.\d+|\d+)")
+#: 有理数的"字符白名单"（业务约定：答案形态是教学规范，不是库能力）
+_RATIONAL_CHARS = re.compile(r"^[0-9./+\-]+$")
 _BRACKETS_RE = re.compile(r"^[\[(](.*)[\])]$")
 
 
 def _parse_rational(text: str) -> Fraction:
+    """有理数解析：**值交给成熟解析器 `fractions.Fraction`**，本函数只做"哪些写法算数"。
+
+    不用自己写数值文法：`Fraction` 已经能正确解析 `3/2` / `-0.5` / `.5` / `1.` 并给出
+    精确值（不经过 float）。我们只加一条白名单，挡掉它过于宽松的写法（`1e3`、`1_000`）。
+    """
     s = text.strip()
     if not s:
         raise _ParseError("空输入")
-    if not _RATIONAL_RE.fullmatch(s):
+    if not _RATIONAL_CHARS.fullmatch(s):
         raise _ParseError(f"不是有理数文法: {s!r}")
-    if "/" in s:
-        num, den = s.split("/", 1)
-        if int(den) == 0:
-            raise _ParseError("分母为零")
-        return Fraction(int(num), int(den))
-    s = s.rstrip(".")
     try:
         return Fraction(s)
     except (ValueError, ZeroDivisionError) as exc:
-        raise _ParseError(str(exc)) from exc
+        raise _ParseError(f"Fraction 拒绝 {s!r}: {exc}") from exc
 
 
 def _strip_brackets(s: str) -> str:
