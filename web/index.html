@@ -2,10 +2,14 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>研数 · 考研数学 AI 自学系统</title>
+<!-- 界面模式：尽早给 <html> 打上 data-layout（自动识别手机/电脑，也可手动切换） -->
+<script src="js/layout.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <link rel="stylesheet" href="assets/style.css">
+<!-- 手机版样式层：全部规则锁在 html[data-layout="mobile"] 下，电脑端一次都不命中 -->
+<link rel="stylesheet" href="assets/mobile.css">
 </head>
 <body>
 <div id="app">
@@ -47,6 +51,8 @@
       <div class="side-tip" id="side-tip">每天 30 分钟，数学不掉队。</div>
       <!-- 同步状态：由 web/js/api.js 的 onChange 驱动（离线 / 未登录 / 已同步 vN） -->
       <div class="side-tip" id="sync-status" title="与服务端的同步状态">同步：初始化…</div>
+      <!-- 界面模式切换：自动 → 手机版 → 电脑版（逻辑在 web/js/layout.js） -->
+      <button id="layout-toggle" type="button">界面：自动</button>
     </div>
   </aside>
   <main id="main"></main>

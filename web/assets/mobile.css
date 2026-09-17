@@ -1,0 +1,111 @@
+/* web/assets/mobile.css —— 界面模式层（手机版）
+ *
+ * 隔离原则（决策人要求"手机适配不要影响电脑端"）：本文件所有手机规则都写在
+ * `html[data-layout="mobile"]` 选择器下。电脑端（data-layout=desktop 或脚本未运行）
+ * **一次都不会命中**——不是"尽量不影响"，是结构上碰不到。
+ *
+ * 基准设备：小米 15（1200×2670 物理 / DPR 3 → **约 400×890 CSS px**）；
+ * 覆盖区间 360–430px（含 iPhone 15 的 393×852、SE 的 375×667）。
+ *
+ * 为什么不用 Bootstrap/Tailwind：fork 的 style.css 是 1063 行自研样式，
+ * 引框架=重写 UI —— BOUNDARY §0 明令不得重写，且会打断 test-dom-wiring 依赖的标记结构。
+ * 这里用的都是标准 CSS 能力：clamp() 流式字号 / dvh 视口单位 / env(safe-area-inset-*) 安全区。
+ */
+
+/* ---------- 0. 切换按钮（这条不分模式：它是新增元素，不改动任何既有元素外观） ---------- */
+#layout-toggle {
+  font-size: 11px; line-height: 1; padding: 4px 9px; margin-top: 6px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--ink-3); cursor: pointer;
+}
+#layout-toggle:hover { color: var(--ink); border-color: var(--ink-3); }
+
+/* 脚本没跑时按钮没有意义，藏掉 */
+html:not([data-layout]) #layout-toggle { display: none; }
+
+/* ============================================================
+   下面全部只在手机模式生效
+   ============================================================ */
+
+/* ---------- 1. 骨架：侧栏 → 底部标签栏（移动端标准做法）--------- */
+html[data-layout="mobile"] body { -webkit-text-size-adjust: 100%; overscroll-behavior-y: none; }
+html[data-layout="mobile"] #app { display: block; min-height: 100dvh; }
+html[data-layout="mobile"] #sidebar {
+  position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+  width: auto; height: auto; flex-direction: column; gap: 0;
+  padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
+  border-right: 0; border-top: 1px solid var(--line);
+  background: var(--panel); z-index: 60;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, .06);
+}
+html[data-layout="mobile"] .brand { display: none; }   /* 品牌区占高，手机上省掉 */
+html[data-layout="mobile"] #nav {
+  display: flex; flex-direction: row; align-items: stretch;
+  gap: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; padding: 2px 0;
+}
+html[data-layout="mobile"] #nav::-webkit-scrollbar { display: none; }
+html[data-layout="mobile"] .nav-item {
+  flex: 1 0 auto; min-width: 58px; min-height: 48px;      /* 触控目标 ≥ 44px */
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 6px 8px; border-radius: 12px;
+  font-size: 10.5px; line-height: 1.1;
+}
+html[data-layout="mobile"] .nav-item .ic { width: 20px; height: 20px; }
+html[data-layout="mobile"] .nav-item .badge { top: 2px; right: 6px; }
+
+/* 底栏里只留"同步状态"与"界面切换"：等级/连击/贴士是电脑端侧栏的装饰 */
+html[data-layout="mobile"] .side-foot {
+  display: flex; flex-direction: row; align-items: center;
+  justify-content: space-between; gap: 8px; padding: 0 6px 2px;
+}
+html[data-layout="mobile"] .lv-bar,
+html[data-layout="mobile"] .streak,
+html[data-layout="mobile"] #side-tip { display: none; }
+html[data-layout="mobile"] #sync-status {
+  font-size: 10.5px; opacity: .72; margin-top: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%;
+}
+html[data-layout="mobile"] #layout-toggle { font-size: 10.5px; padding: 4px 8px; margin-top: 0; }
+
+/* 正文全宽（这就是"感觉有点大"的根因：原先手机下侧栏仍占 176px ≈ 44% 屏宽）*/
+html[data-layout="mobile"] #main {
+  padding: 12px 12px calc(72px + env(safe-area-inset-bottom, 0px));
+  max-width: none; margin: 0;
+}
+
+/* ---------- 2. 排版与间距：手机上一档收紧 ---------- */
+html[data-layout="mobile"] h1 { font-size: clamp(19px, 5.2vw, 22px); }
+html[data-layout="mobile"] h2 { font-size: clamp(16px, 4.4vw, 18px); }
+html[data-layout="mobile"] .card { padding: 12px 13px; border-radius: 12px; }
+html[data-layout="mobile"] .grid-2,
+html[data-layout="mobile"] .grid-3,
+html[data-layout="mobile"] .grid-4 { grid-template-columns: 1fr; }
+html[data-layout="mobile"] .stat-box { padding: 10px 12px; }
+html[data-layout="mobile"] .stat-box .v { font-size: 19px; }
+html[data-layout="mobile"] .q-stem { font-size: clamp(14.5px, 4.1vw, 16px); line-height: 1.65; }
+html[data-layout="mobile"] .chat-layout { flex-direction: column; }
+html[data-layout="mobile"] .chat-side { width: 100%; }
+html[data-layout="mobile"] .ch-grid { grid-template-columns: 1fr; }
+
+/* ---------- 3. 触控与表单（移动端硬要求）---------- */
+html[data-layout="mobile"] .btn,
+html[data-layout="mobile"] .opt,
+html[data-layout="mobile"] .seg-btn { min-height: 44px; }
+html[data-layout="mobile"] input,
+html[data-layout="mobile"] textarea,
+html[data-layout="mobile"] select { font-size: 16px; }  /* ≥16px：防聚焦时整页缩放 */
+html[data-layout="mobile"] .btn,
+html[data-layout="mobile"] .nav-item,
+html[data-layout="mobile"] .opt,
+html[data-layout="mobile"] #layout-toggle { -webkit-tap-highlight-color: transparent; }
+
+/* ---------- 4. 公式与宽内容：能横滑，不许撑破布局 ---------- */
+html[data-layout="mobile"] .katex-display,
+html[data-layout="mobile"] .q-stem,
+html[data-layout="mobile"] table,
+html[data-layout="mobile"] pre {
+  overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%;
+}
+html[data-layout="mobile"] .katex-display { padding: 2px 0 6px; }
+html[data-layout="mobile"] table { display: block; }
