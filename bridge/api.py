@@ -22,6 +22,7 @@ import re
 import sys
 import time
 import tomllib
+from datetime import date
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -207,6 +208,39 @@ class Bridge:
                                   user_ms=payload.get("user_ms"), device=payload.get("device"))
         return HTTPStatus.OK, result
 
+    # ---- 题库（替代 fork 的 data-questions.js；BOUNDARY §0 的「替换」裁定）
+    @staticmethod
+    def _question_json(row, *, with_answer: bool = True) -> dict:
+        """DB 行 → 前端题目对象（形状与 fork 的 QDATA 一致：options 是数组）。"""
+        opts = row["options"]
+        try:
+            options = json.loads(opts) if opts else None
+        except (TypeError, json.JSONDecodeError):
+            options = None
+        q = {
+            "id": row["id"], "kid": row["kid"], "type": row["type"],
+            "stem": row["stem"], "options": options,
+            "difficulty": row["difficulty"], "source": row["source"],
+        }
+        if with_answer:
+            q["answer"] = row["answer"]
+            q["analysis"] = row["analysis"] or ""
+        return q
+
+    def daily_questions(self, limit: int = 8) -> list[dict]:
+        """当日题单：**同一天同一批**（按日期确定性选择），够用且可复现。
+
+        为什么先这么简单：Phase 1 的目标是"能稳定做题"，真正的选题器是 P2b 的 `modules/picker`。
+        这里不引入复杂度，只保证「今天这 8 题今天不变」。
+        """
+        rows = self.store.list_questions()
+        if not rows:
+            return []
+        seed = int(hashlib.sha1(date.today().isoformat().encode("utf-8")).hexdigest()[:8], 16)
+        start = seed % len(rows)
+        picked = [rows[(start + i) % len(rows)] for i in range(min(limit, len(rows)))]
+        return [self._question_json(r) for r in picked]
+
 
 # ---------------------------------------------------------------- HTTP
 
@@ -309,7 +343,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/daily" and method == "GET":
                 blob = b.store.get_blob()
                 self._send(HTTPStatus.OK, {"server_version": blob["server_version"],
-                                           "daily": blob["data"].get("daily")})
+                                           "daily": blob["data"].get("daily"),
+                                           "questions": b.daily_questions()})
                 return
 
             if path == "/api/judge" and method == "POST":

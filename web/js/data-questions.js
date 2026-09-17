@@ -1,4 +1,18 @@
-/* 考研数学题库（选择 + 填空），字段：id / kid(知识点) / type / stem / options / answer / analysis / difficulty / sourceType / sourceYear / source */
+/* 题库来源已**替换**（BOUNDARY §0 的裁定 + ADR-008 合规线）：
+ *
+ * 上游 `data-questions.js` 的 204 道题**授权链未声明**（MIT 只覆盖代码、不覆盖题目数据），
+ * 故不再随仓分发。现在题目一律来自服务端：
+ *   · 我方生成器产出（generators/ → bundle → questions 表）
+ *   · 用户自备的自定义题（customQ 通道）
+ * 启动时由 web/js/app.js 调 MDStore.loadQuestions() 拉取并填充 window.QDATA。
+ *
+ * 保留这个同名空数组，是为了不打断任何按名引用的代码；
+ * 也顺带修掉了上游的一个坑：前端本地判分（现已全线改走 /api/judge）。
+ */
+window.QDATA = [];
+
+/* 上游原始文件的字段说明（存档备查，勿据此恢复数据）：
+ * id / kid(知识点) / type / stem / options / answer / analysis / difficulty / sourceType / sourceYear / source */
 window.QDATA = [
   /* ---------- 高数 CH1 极限 ---------- */
   { id: 'q01', kid: 'c1n2', type: 'choice', difficulty: 2,

@@ -188,6 +188,18 @@
       });
     },
 
+    /* 题库：一律由服务端提供（BOUNDARY §0：data-questions.js 已替换为服务端载入）。
+       离线/未登录时抛出——调用方（app.js）据此提示去 /setup 拿 cookie。 */
+    loadQuestions: function () {
+      return request('GET', '/api/daily').then(function (r) {
+        if (r.status === 200 && r.data && Array.isArray(r.data.questions)) return r.data.questions;
+        var err = new Error((r.data && (r.data.message || r.data.error)) ||
+                            ('题库拉取失败 HTTP ' + r.status));
+        err.code = r.data && r.data.error;
+        throw err;
+      });
+    },
+
     /* 同步状态订阅（给 index.html 的状态灯用） */
     onChange: function (fn) { listeners.push(fn); try { fn(status()); } catch (e) { /* 忽略 */ } },
     status: status

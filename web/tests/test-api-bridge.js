@@ -125,6 +125,22 @@ console.log('\n=== web/js/api.js 存储桥 ===');
     ok('bootstrap 覆盖本地缓存', win.MDStore.loadCached().from === 'server');
   }
 
+  // ⑦ 题库：由服务端提供（BOUNDARY §0 替换 data-questions.js）
+  {
+    const { win, calls } = makeEnv();
+    win.__responses.push({ status: 200, body: { questions: [{ id: 'q1', kid: 'l1n1' }] } });
+    const qs = await win.MDStore.loadQuestions();
+    ok('loadQuestions() 打到 /api/daily', calls[0].url === '/api/daily' && calls[0].opt.method === 'GET');
+    ok('loadQuestions() 返回题目数组', Array.isArray(qs) && qs.length === 1 && qs[0].id === 'q1');
+  }
+  {
+    const { win } = makeEnv();
+    win.__responses.push({ status: 401, body: { error: 'unauthorized' } });
+    let threw = null;
+    try { await win.MDStore.loadQuestions(); } catch (e) { threw = e; }
+    ok('未登录时 loadQuestions() 抛错（交给 UI 提示去 /setup）', !!threw && threw.code === 'unauthorized');
+  }
+
   console.log('');
   if (fail) {
     console.log('❌ 有失败：' + (pass + fail) + ' 项，失败 ' + fail);

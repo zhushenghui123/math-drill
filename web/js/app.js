@@ -2973,6 +2973,19 @@
       else el.textContent = '同步：已同步 v' + s.version;
     });
   }
+  // 题库来源：服务端（BOUNDARY §0 —— data-questions.js 的 204 道上游题已被替换掉）
+  if (typeof MDStore !== 'undefined' && MDStore.loadQuestions) {
+    MDStore.loadQuestions().then(function (qs) {
+      if (!qs || !qs.length) return;
+      window.QDATA.length = 0;
+      Array.prototype.push.apply(window.QDATA, qs);
+      rebuildKidOfQ();
+      mergeCustomQ();
+      route();
+    }).catch(function (e) {
+      toast('题库未加载：' + ((e && e.message) || e) + '（先访问 /setup?t=<token> 拿登录凭据）', 'no');
+    });
+  }
   mergeCustomQ();
   window.addEventListener('hashchange', route);
   window.addEventListener('load', route);

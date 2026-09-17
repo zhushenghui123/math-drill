@@ -288,6 +288,15 @@ class Store:
         with self._lock:
             return int(self.conn.execute("SELECT COUNT(*) AS c FROM questions").fetchone()["c"])
 
+    def list_questions(self) -> list[dict]:
+        """按 id 排序返回全部题目（题库视图；给 bridge 的 /api/daily 用）。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, kid, type, answer_type, stem, options, answer, analysis,"
+                " difficulty, source FROM questions ORDER BY id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def load_kp(self, rows: list[dict]) -> int:
         n = 0
         with self._lock:

@@ -200,6 +200,22 @@ class APITestCase(unittest.TestCase):
         self.assertEqual(body["latest"]["server_version"], 1)
 
     # ---- ⑩ 模块路由（phase 门）
+    def test_10b_daily_questions_payload(self) -> None:
+        """题库端点：替代 fork 的 data-questions.js（BOUNDARY §0 的替换裁定）。"""
+        status, body, _ = _req(self.url("/api/daily"), cookie=self.cookie)
+        self.assertEqual(status, 200, body)
+        qs = body.get("questions")
+        self.assertIsInstance(qs, list)
+        self.assertGreaterEqual(len(qs), 1, "题库非空（test_07 已灌 2 题）")
+        for f in ("id", "kid", "type", "stem", "options", "answer", "difficulty"):
+            self.assertIn(f, qs[0])
+        # 同一天同一批：两次请求顺序与内容一致（确定性）
+        _, body2, _ = _req(self.url("/api/daily"), cookie=self.cookie)
+        self.assertEqual([q["id"] for q in qs], [q["id"] for q in body2["questions"]])
+        # 未登录拿不到题库
+        status_noauth, _, _ = _req(self.url("/api/daily"))
+        self.assertEqual(status_noauth, 401)
+
     def test_11_module_rpc_phase_gating(self) -> None:
         status, body, _ = _req(self.url("/m/review/sync"), method="POST", body={},
                                cookie=self.cookie)
