@@ -29,9 +29,14 @@ def _load_matrix() -> dict:
 
 
 def _py_files() -> list[Path]:
+    """扫描**运行时代码**：跳过 tests/（测试不是运行域，不受 6×6 矩阵约束）。
+
+    为什么不扫 tests/：矩阵管的是"运行时谁能 import 谁"，而测试天生要 import 被测对象
+    （例：生成器自测 import 自己的 generator）——那会被误判成 generators→generators 横向依赖。
+    """
     out: list[Path] = []
     for d in DOMAINS:
-        out += sorted((REPO / d).rglob("*.py"))
+        out += sorted(p for p in (REPO / d).rglob("*.py") if "tests" not in p.parts)
     return out
 
 

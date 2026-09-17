@@ -30,7 +30,10 @@ MATH_DRILL_TOKEN_FILE=/path/to/token python3 -m bridge.api
 
 # ② 校验（改完 docs/ 先跑第一个；三道全绿再提交）
 python3 scripts/refcheck.py                 # 文档自洽护栏（C1 树↔契约 / C2 单源值 / C3 自陈数字）
-python3 -m unittest discover -s tests       # Python 套件（判定/存储/桥/依赖纪律）
+# Python 套件（本仓用命名空间包，顶层 discover 找不到子目录，故逐目录跑）
+set -e; for d in tests generators/*/tests modules/*/tests; do
+  [ -n "$(ls "$d"/test_*.py 2>/dev/null)" ] && python3 -m unittest discover -s "$d"
+done
 node web/tests/run-all.js                   # 前端套件（fork 基线 + 存储桥自测）
 ```
 
@@ -39,7 +42,8 @@ node web/tests/run-all.js                   # 前端套件（fork 基线 + 存�
 | 层 | 基线 | 说明 |
 |---|---|---|
 | 前端（node） | **528 项** | fork 原始 511 + 新增 `test-api-bridge` 17（BOUNDARY §3③） |
-| 后端（python3.12 / 3.14） | **53 项** | 判定 13 · 存储 13 · 桥 24 · 依赖纪律 3（另 `test_exact` 30 断言） |
+| 后端（python3.12 / 3.14） | **59 项** | 判定 13 · 存储 13 · 桥 24 · 依赖纪律 3 · 题源 6（另 `test_exact` 30 断言） |
+| 题源 | — | `generators/linalg_det`：48 题 / 8 题族；**同 seed 同字节**（sha256 可核） |
 
 两套都必须双绿；前端 511 是**下限**（只许加不许删）。
 
