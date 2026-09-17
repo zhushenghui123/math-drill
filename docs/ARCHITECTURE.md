@@ -582,9 +582,17 @@ math.zhu2006.xyz {
 | 项 | 规格 |
 |---|---|
 | 频率 | 每日一次（避开整点） |
-| 动作 | `sqlite3 .backup` 到 `/var/backups/math-drill/` + `PRAGMA integrity_check` |
+| 动作 | **在线备份到 `/var/backups/math-drill/` + `PRAGMA integrity_check`**（实现用 Python stdlib `sqlite3.Connection.backup()`——见下方 v2.11 实测注，**目标机没有 `sqlite3` 命令行**） |
 | 保留 | 最近 7 份（轮转） |
 | 失败处理 | 退出码非 0 写日志（**不做告警推送**——决策人明确不要推送类功能） |
+
+> **v2.11 部署实测补两条（都是"照文档做会撞上"的坑）**：
+> ① **目标机没有 `sqlite3` CLI**（2026-09-17 实测 `command not found`）——故 `backup_check.sh` 改用
+>   Python 标准库的 `Connection.backup()`（就是 SQLite 官方在线备份 API，不是自造）；好处是不用往服务器装任何包。
+> ② **`ReadWritePaths=` 指向的路径必须已存在**，否则 systemd 的 mount 命名空间直接失败
+>   （实测报错 `Failed to set up mount namespacing: /var/backups/math-drill: No such file or directory`，`status=226/NAMESPACE`）。
+>   故：`backup.service` 里该路径写成 **`-/var/backups/math-drill`**（不存在时不致命），
+>   且部署时先 `install -d -m 750 -o math-drill -g math-drill /var/backups/math-drill`。
 
 ### 12.4 部署验收（T7 的执行标准）
 

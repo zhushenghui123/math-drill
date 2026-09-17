@@ -16,5 +16,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 StateDirectory=math-drill
-# 数据目录只读够用（.backup 是读源），备份目录需可写
-ReadWritePaths=/var/backups/math-drill
+# 数据目录只读够用（.backup 是读源），备份目录需可写。
+# ⚠️ `ReadWritePaths` 指向的路径**必须已存在**，否则 systemd 的 mount 命名空间会直接失败
+#    （实测报错：Failed to set up mount namespacing ... status=226/NAMESPACE）。
+#    故这里给备份目录加 `-` 前缀（路径不存在时不致命），并在部署时先 `install -d` 建好它。
+ReadWritePaths=/var/lib/math-drill -/var/backups/math-drill
