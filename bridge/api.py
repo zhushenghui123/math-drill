@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from contracts.answer_types import ErrorCode
-from core.judge import JudgeError, judge_by_qid
+from core.judge import JudgeError, judge
 from core.registry import Registry
 from core.store import ConflictError, Store
 
@@ -185,22 +185,19 @@ class Bridge:
             return HTTPStatus.BAD_REQUEST, {"error": ErrorCode.MALFORMED_REQUEST.value,
                                             "message": "需要 qid 与 raw_answer（字符串）"}
 
-        def lookup(q: str):
-            found = self.store.get_question(q)
-            if found is None:
-                raise KeyError(q)
-            return found
-
+        row = self.store.conn.execute(
+            "SELECT answer_type, answer, type, kid FROM questions WHERE id=?", (qid,)
+        ).fetchone()
+        if row is None:
+            return HTTPStatus.NOT_FOUND, {"error": ErrorCode.UNKNOWN_QID.value,
+                                          "message": f"题库没有 {qid}"}
         try:
-            result = judge_by_qid(qid, raw, lookup=lookup)
+            result = judge(raw, answer_type=row["answer_type"], canonical=row["answer"],
+                           q_type=row["type"])
         except JudgeError as exc:
-            status = HTTPStatus.NOT_FOUND if exc.code == ErrorCode.UNKNOWN_QID.value \
-                else HTTPStatus.BAD_REQUEST
-            return status, {"error": exc.code, "message": str(exc)}
+            return HTTPStatus.BAD_REQUEST, {"error": exc.code, "message": str(exc)}
 
-        kid_row = self.store.conn.execute("SELECT kid FROM questions WHERE id=?", (qid,)).fetchone()
-        kid = kid_row["kid"] if kid_row else None
-        self.store.record_attempt(qid=qid, kid=kid, result=result,
+        self.store.record_attempt(qid=qid, kid=row["kid"], result=result,
                                   user_ms=payload.get("user_ms"), device=payload.get("device"))
         return HTTPStatus.OK, result
 

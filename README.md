@@ -23,7 +23,25 @@
 
 ## 开发：怎么跑
 
-（待 T3 完成后填写：`python3 -m bridge.api`。）
+```bash
+# ① 服务端（T3 起可用）。注意：绑定与数据目录只读 config/server.toml，
+#    没有 env/CLI 覆盖——本地开发就改那一行 data_dir（ARCHITECTURE §13.1）。
+MATH_DRILL_TOKEN_FILE=/path/to/token python3 -m bridge.api
+
+# ② 校验（改完 docs/ 先跑第一个；三道全绿再提交）
+python3 scripts/refcheck.py                 # 文档自洽护栏（C1 树↔契约 / C2 单源值 / C3 自陈数字）
+python3 -m unittest discover -s tests       # Python 套件（判定/存储/桥/依赖纪律）
+node web/tests/run-all.js                   # 前端套件（fork 基线 + 存储桥自测）
+```
+
+测试基线（会随新增测试上升，以实际输出为准）：
+
+| 层 | 基线 | 说明 |
+|---|---|---|
+| 前端（node） | **528 项** | fork 原始 511 + 新增 `test-api-bridge` 17（BOUNDARY §3③） |
+| 后端（python3.12 / 3.14） | **53 项** | 判定 13 · 存储 13 · 桥 24 · 依赖纪律 3（另 `test_exact` 30 断言） |
+
+两套都必须双绿；前端 511 是**下限**（只许加不许删）。
 
 ## 开发：加一个模块
 

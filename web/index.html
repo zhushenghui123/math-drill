@@ -1,1 +1,72 @@
-<!-- web/index.html —— 入口页（fork 的 index.html 于 T4 落此；加同步状态 + 隐藏 classroom 入口） -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研数 · 考研数学 AI 自学系统</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">∫</div>
+      <div class="brand-text">
+        <div class="brand-name">研数</div>
+        <div class="brand-sub">考研数学 · 自学</div>
+      </div>
+    </div>
+    <!-- 导航图标统一为 24×24 viewBox + 1.5px 描边（fill:none，样式在 .nav-item .ic 里），
+         不再混用实心 path 与 emoji。 -->
+    <nav id="nav">
+      <a href="#/" data-route="/" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span>仪表盘</span><i class="badge" id="nav-due-badge" hidden></i></a>
+      <a href="#/learn" data-route="/learn" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><path d="M21 6h-7"/><path d="M21 12h-7"/><path d="M21 18h-7"/><path d="M3 6v4a2 2 0 0 0 2 2h3"/><path d="M3 10v6a2 2 0 0 0 2 2h3"/></svg><span>知识树</span></a>
+      <a href="#/quiz" data-route="/quiz" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg><span>每日一练</span></a>
+      <a href="#/review" data-route="/review" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg><span>复习队列</span><i class="badge" id="nav-review-badge" hidden></i></a>
+      <a href="#/mistakes" data-route="/mistakes" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg><span>错题本</span><i class="badge" id="nav-mistake-badge" hidden></i></a>
+      <a href="#/stats" data-route="/stats" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>统计</span></a>
+      <a href="#/cards" data-route="/cards" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><path d="M12.8 2.2a2 2 0 0 0-1.6 0L2.6 6.1a1 1 0 0 0 0 1.8l8.6 3.9a2 2 0 0 0 1.6 0l8.6-3.9a1 1 0 0 0 0-1.8Z"/><path d="m22 17.6-9.2 4.2a2 2 0 0 1-1.6 0L2 17.6"/><path d="m22 12.6-9.2 4.2a2 2 0 0 1-1.6 0L2 12.6"/></svg><span>卡片库</span></a>
+      <a href="#/achievements" data-route="/achievements" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="8" r="6"/><path d="m15.5 12.9 1.5 8.5a.5.5 0 0 1-.8.5l-3.6-2.7a1 1 0 0 0-1.2 0l-3.6 2.7a.5.5 0 0 1-.8-.5l1.5-8.5"/></svg><span>成就</span><i class="badge" id="nav-ach-badge" hidden></i></a>
+      <a href="#/settings" data-route="/settings" class="nav-item"><svg viewBox="0 0 24 24" class="ic"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></svg><span>设置</span></a>
+    </nav>
+    <div class="side-foot">
+      <!-- 等级条：等级 + 称号 + 本级 XP 进度。refreshBadges() 负责刷新。 -->
+      <a class="lv-bar" href="#/achievements" id="side-level" title="看成就">
+        <div class="lv-top lv-face">
+          <span class="lv-num" id="side-lv">1</span>
+          <span class="lv-title" id="side-lv-title">初识极限</span>
+          <span class="lv-xp" id="side-xp">0</span>
+        </div>
+        <div class="lv-track"><div class="lv-fill" id="side-lv-fill" style="width:0%"></div></div>
+      </a>
+      <div class="streak">
+        <div class="streak-num" id="side-streak">0</div>
+        <div class="streak-label">连续学习天数</div>
+      </div>
+      <div class="side-tip" id="side-tip">每天 30 分钟，数学不掉队。</div>
+      <!-- 同步状态：由 web/js/api.js 的 onChange 驱动（离线 / 未登录 / 已同步 vN） -->
+      <div class="side-tip" id="sync-status" title="与服务端的同步状态">同步：初始化…</div>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div id="toast-root"></div>
+<!-- 打印专用容器：屏幕上 display:none，打印时只显示它。放在 body 直接子级是为了能用 body > *:not(#print-root) 一刀切。 -->
+<div id="print-root"></div>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<!-- 唯一存储桥：必须在其它脚本之前（app.js 启动时会用它读缓存与对账） -->
+<script src="js/api.js"></script>
+<script src="js/sm2.js"></script>
+<script src="js/data-knowledge.js"></script>
+<script src="js/data-questions.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/llm.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/agent.js"></script>
+<script src="js/classroom.js"></script>
+<script src="js/cards.js"></script>
+<script src="js/game.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,7 +1,197 @@
-// web/js/api.js —— 唯一存储桥 + judge 客户端（45 个 save() 调用点不动，全部经此收敛）
-//
-// 预留窗口（题库，Phase 3）：本文件是**唯一**允许发起 HTTP 的地方。
-// 未来题库调用在此加薄封装，形如：
-//   qbank.list({type, difficulty, done})  → GET /m/qbank/list
-//   qbank.detail(qid)                     → GET /m/qbank/detail
-// 纪律：不得新增第二个端口 / 第二个网关（ARCHITECTURE §11.5）。
+/* web/js/api.js —— **唯一的存储交互桥 + judge 客户端**（ADR-002 / BOUNDARY §1）
+ *
+ * 纪律（改它就等于改了全站数据流，动手前先看 docs/BOUNDARY.md §1）：
+ *   ① 本文件是**唯一**允许发起 HTTP 的地方；其它 js 不许直接 fetch/XHR
+ *   ② localStorage 只作**本地缓存**（离线可用），服务端 blob 才是同步真相源
+ *   ③ 判定一律 POST /api/judge —— 前端不再有任何比对逻辑（JUDGE_CONTRACT I1）
+ *   ④ 不得新增第二个端口 / 第二个网关（ARCHITECTURE §11.5）
+ *
+ * 预留窗口（题库，Phase 3）：`/m/qbank/*` 的薄封装将来加在这里，例如
+ *   qbank.list({type, difficulty, done}) → GET  /m/qbank/list
+ *   qbank.detail(qid)                    → GET  /m/qbank/detail
+ */
+(function (root) {
+  'use strict';
+
+  var DB_KEY = 'kaoyan_math_tutor_v1';   // 沿用旧存档键名：改了就等于丢掉用户旧进度
+  var DEBOUNCE_MS = 800;
+
+  var state = {
+    version: 0,        // 与服务端 server_version 对齐
+    pending: false,    // 有本地改动还没推上去
+    online: true,      // 最近一次请求是否成功
+    lastError: null,
+    lastSync: 0
+  };
+  var listeners = [];
+  var timer = null;
+
+  function status() {
+    return {
+      version: state.version, pending: state.pending, online: state.online,
+      lastError: state.lastError, lastSync: state.lastSync
+    };
+  }
+
+  function notify() {
+    var s = status();
+    for (var i = 0; i < listeners.length; i++) {
+      try { listeners[i](s); } catch (e) { /* 监听者自己出错不该影响同步 */ }
+    }
+  }
+
+  function device() {
+    var ua = (root.navigator && root.navigator.userAgent) || '';
+    if (/iPad|Tablet/i.test(ua)) return 'tablet';
+    if (/Mobile|Android|iPhone/i.test(ua)) return 'phone';
+    return 'desktop';
+  }
+
+  function readCache() {
+    try {
+      var raw = root.localStorage ? root.localStorage.getItem(DB_KEY) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function writeCache(data) {
+    try {
+      if (root.localStorage) root.localStorage.setItem(DB_KEY, JSON.stringify(data));
+    } catch (e) { /* 存储满等异常忽略：下次同步仍能把服务端版本带回来 */ }
+  }
+
+  function request(method, url, body) {
+    if (typeof root.fetch !== 'function') {
+      return Promise.reject(new Error('当前环境不支持 fetch（file:// 直接打开时属正常，需经服务端访问）'));
+    }
+    var opt = { method: method, credentials: 'same-origin', headers: {} };
+    if (body !== undefined) {
+      opt.headers['Content-Type'] = 'application/json';
+      opt.body = JSON.stringify(body);
+    }
+    return root.fetch(url, opt).then(function (r) {
+      state.online = true;
+      return r.text().then(function (txt) {
+        var data = {};
+        try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { _raw: txt }; }
+        return { status: r.status, data: data };
+      });
+    }, function (err) {
+      state.online = false;
+      state.lastError = String((err && err.message) || err);
+      notify();
+      throw err;
+    });
+  }
+
+  function push(data) {
+    state.pending = true;
+    notify();
+    return request('PUT', '/api/state', { base_version: state.version, data: data })
+      .then(function (r) {
+        if (r.status === 200 && r.data && typeof r.data.server_version === 'number') {
+          state.version = r.data.server_version;
+          state.pending = false;
+          state.lastSync = Date.now();
+          notify();
+          return r.data;
+        }
+        if (r.status === 409) {
+          // 版本冲突（§3.5）：采用服务端版本号后重放一次，服务端按 newer-wins 合并
+          var latest = (r.data && r.data.latest) || {};
+          if (typeof latest.server_version === 'number') state.version = latest.server_version;
+          notify();
+          return request('PUT', '/api/state', { base_version: state.version, data: data })
+            .then(function (r2) {
+              if (r2.status === 200) {
+                state.version = r2.data.server_version;
+                state.pending = false;
+                state.lastSync = Date.now();
+              }
+              notify();
+              return r2.data;
+            });
+        }
+        if (r.status === 401) {
+          state.online = false;
+          state.lastError = '未登录（缺会话 cookie）——先访问 /setup?t=<token>';
+        }
+        notify();
+        return r.data;
+      });
+  }
+
+  var MDStore = {
+    DB_KEY: DB_KEY,
+
+    /* 同步读缓存：app.js 的 load() 启动时同步调用（离线也要能打开） */
+    loadCached: readCache,
+
+    /* 同步入口：45 个 save() 调用点走这里（签名不变），内部去抖推送 */
+    save: function (data) {
+      writeCache(data);
+      state.pending = true;
+      notify();
+      if (timer) root.clearTimeout(timer);
+      timer = root.setTimeout(function () { timer = null; push(data); }, DEBOUNCE_MS);
+    },
+
+    /* 清档（对应原来第三处 localStorage.removeItem） */
+    clear: function () {
+      try { if (root.localStorage) root.localStorage.removeItem(DB_KEY); } catch (e) { /* 忽略 */ }
+      state.version = 0;
+      state.pending = false;
+      notify();
+    },
+
+    /* 启动时与服务端对账：服务端有数据 → 它就是真相源（覆盖本地缓存） */
+    bootstrap: function () {
+      return request('GET', '/api/state').then(function (r) {
+        if (r.status !== 200 || !r.data || typeof r.data.server_version !== 'number') {
+          if (r.status === 401) {
+            state.online = false;
+            state.lastError = '未登录（缺会话 cookie）——先访问 /setup?t=<token>';
+            notify();
+          }
+          return { source: 'cache', data: readCache() };
+        }
+        state.version = r.data.server_version;
+        var serverData = r.data.data || {};
+        if (Object.keys(serverData).length > 0) {
+          writeCache(serverData);
+          state.pending = false;
+          state.lastSync = Date.now();
+          notify();
+          return { source: 'server', data: serverData };
+        }
+        var local = readCache();
+        if (local) push(local);      // 服务端还空、本地有 → 首次上云
+        return { source: 'cache', data: local };
+      });
+    },
+
+    /* 判定：唯一入口（前端不做任何比对） */
+    judge: function (qid, rawAnswer, opts) {
+      opts = opts || {};
+      var payload = {
+        qid: qid,
+        raw_answer: String(rawAnswer == null ? '' : rawAnswer),
+        device: device()
+      };
+      if (opts.userMs != null) payload.user_ms = opts.userMs;
+      return request('POST', '/api/judge', payload).then(function (r) {
+        if (r.status === 200) return r.data;
+        var err = new Error((r.data && (r.data.message || r.data.error)) || ('判定失败 HTTP ' + r.status));
+        err.code = r.data && r.data.error;
+        err.response = r.data;
+        throw err;
+      });
+    },
+
+    /* 同步状态订阅（给 index.html 的状态灯用） */
+    onChange: function (fn) { listeners.push(fn); try { fn(status()); } catch (e) { /* 忽略 */ } },
+    status: status
+  };
+
+  root.MDStore = MDStore;
+})(typeof window !== 'undefined' ? window : this);

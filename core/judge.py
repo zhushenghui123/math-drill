@@ -199,14 +199,30 @@ def _coerce_type(answer_type) -> AnswerType:
         raise JudgeError(ErrorCode.TYPE_MISMATCH, f"未知 answer_type: {answer_type!r}") from exc
 
 
-def judge(raw_answer: str, *, answer_type, canonical: str) -> dict:
-    """判定单题（§3 fail-closed 决策树）。返回 §1.2 的响应结构。"""
+def judge(raw_answer: str, *, answer_type, canonical: str, q_type: str | None = None) -> dict:
+    """判定单题（§3 fail-closed 决策树）。返回 §1.2 的响应结构。
+
+    `q_type` 是题目形态（ARCHITECTURE §3.1 的 `type`：choice/blank/solution），与 `answer_type`
+    正交。选择题的"规范型"就是选项键本身，故走**键的规范化精确相等**这一条（不解析数值）——
+    这条分支是本项目对 §3 决策树的补充说明（契约原文只覆盖 answer_type 维度）。
+    """
     atype = _coerce_type(answer_type)
 
     if not isinstance(raw_answer, str) or not isinstance(canonical, str):
         raise JudgeError(ErrorCode.MALFORMED_REQUEST, "raw_answer/canonical 必须是字符串")
 
     base = {"canonical": canonical, "answer_type": atype.value}
+
+    # 选择题：规范型 = 选项键（去空白 + 大写），只做精确相等
+    if q_type == "choice":
+        u = norm(raw_answer).replace(" ", "").upper()
+        a = norm(canonical).replace(" ", "").upper()
+        if not u:
+            return {**base, "verdict": Verdict.UNDECIDABLE.value, "correct": None,
+                    "detail": {"reason": "parse_failed", "accepted_forms": [a]}}
+        verdict = Verdict.SERVER_TRUE.value if u == a else Verdict.SERVER_FALSE.value
+        return {**base, "verdict": verdict, "correct": u == a,
+                "detail": {"reason": "choice-key", "accepted_forms": [a]}}
 
     # self_report：一等公民通道（I6）——不比对
     if atype is AnswerType.SELF_REPORT:

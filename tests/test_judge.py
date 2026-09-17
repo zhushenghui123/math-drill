@@ -92,6 +92,15 @@ class TestTypeBoundary(unittest.TestCase):
             judge_by_qid("no-such-qid", "1", lookup=lookup)
         self.assertEqual(cm.exception.code, "unknown_qid")
 
+    def test_17_choice_question_by_key(self) -> None:
+        """选择题（ARCHITECTURE §3.1 的 type=choice）：规范型 = 选项键，精确相等。"""
+        ok = judge("A", answer_type="rational", canonical="a", q_type="choice")
+        self.assertEqual(ok["verdict"], "server_true")
+        bad = judge("B", answer_type="rational", canonical="a", q_type="choice")
+        self.assertEqual(bad["verdict"], "server_false")
+        empty = judge("   ", answer_type="rational", canonical="a", q_type="choice")
+        self.assertEqual(empty["verdict"], "undecidable")
+
 
 # ---------------------------------------------------------------- §5.3
 
