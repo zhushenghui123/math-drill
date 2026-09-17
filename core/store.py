@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -115,7 +116,9 @@ class Store:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / db_name
         self.blob_path = self.data_dir / blob_name
-        self.conn = sqlite3.connect(self.db_path)
+        # HTTP 是每请求一线程（ThreadingHTTPServer），故连接跨线程共享 + 自己加锁串行化
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
@@ -125,44 +128,48 @@ class Store:
     # ------------------------------------------------------------ 建表
     def ensure_schema(self) -> int:
         """建表 + `schema_version`（本文件的独占职责；模块不得建表）。"""
-        self.conn.executescript(_SCHEMA)
-        cur = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'")
-        row = cur.fetchone()
-        if row is None:
-            self.conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?)",
-                              (str(SCHEMA_VERSION),))
-        self.conn.commit()
-        return self.schema_version
+        with self._lock:
+            self.conn.executescript(_SCHEMA)
+            cur = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'")
+            row = cur.fetchone()
+            if row is None:
+                self.conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?)",
+                                  (str(SCHEMA_VERSION),))
+            self.conn.commit()
+            return self.schema_version
 
     @property
     def schema_version(self) -> int:
-        row = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-        return int(row["value"]) if row else 0
+        with self._lock:
+            row = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            return int(row["value"]) if row else 0
 
     # ------------------------------------------------------------ blob
     def get_blob(self) -> dict:
         """返回服务端持有的完整 blob（含 server_version）。"""
-        if not self.blob_path.exists():
-            return {"server_version": 0, "data": {}}
-        with open(self.blob_path, encoding="utf-8") as f:
-            blob = json.load(f)
-        blob.setdefault("server_version", 0)
-        blob.setdefault("data", {})
-        return blob
+        with self._lock:
+            if not self.blob_path.exists():
+                return {"server_version": 0, "data": {}}
+            with open(self.blob_path, encoding="utf-8") as f:
+                blob = json.load(f)
+            blob.setdefault("server_version", 0)
+            blob.setdefault("data", {})
+            return blob
 
     def _write_blob(self, blob: dict) -> None:
         """原子替换 + fsync（断电不产生半个文件）。"""
-        tmp = self.blob_path.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(blob, f, ensure_ascii=False, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, self.blob_path)
-        dir_fd = os.open(self.data_dir, os.O_DIRECTORY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        with self._lock:
+            tmp = self.blob_path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(blob, f, ensure_ascii=False, sort_keys=True)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.blob_path)
+            dir_fd = os.open(self.data_dir, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
 
     def put_blob(self, base_version: int, incoming: dict) -> dict:
         """客户端整块 PUT。成功返回新 blob；版本不匹配抛 ConflictError（带最新 blob）。"""
@@ -229,13 +236,14 @@ class Store:
         else:
             correct = self._VERDICT_TO_CORRECT[verdict]
 
-        cur = self.conn.execute(
-            "INSERT INTO attempts(ts, qid, kid, verdict, correct, user_ms, device) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (time.time(), qid, kid, verdict, correct, user_ms, device),
-        )
-        self.conn.commit()
-        return int(cur.lastrowid)
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO attempts(ts, qid, kid, verdict, correct, user_ms, device) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (time.time(), qid, kid, verdict, correct, user_ms, device),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
 
     def list_attempts(self, *, qid: str | None = None) -> list[dict]:
         sql = "SELECT * FROM attempts"
@@ -244,58 +252,65 @@ class Store:
             sql += " WHERE qid = ?"
             args = (qid,)
         sql += " ORDER BY id"
-        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+        with self._lock:
+            return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
     # ------------------------------------------------------------ questions / kp
     def load_questions(self, rows: list[dict]) -> int:
         """灌库（T6 的 `scripts/db_init.py` 调用）——幂等 upsert。"""
         n = 0
-        for r in rows:
-            self.conn.execute(
-                "INSERT INTO questions(id, bundle_version, kid, type, answer_type, stem, options,"
-                " answer, analysis, difficulty, gen_params, source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(id) DO UPDATE SET bundle_version=excluded.bundle_version, kid=excluded.kid,"
-                " type=excluded.type, answer_type=excluded.answer_type, stem=excluded.stem,"
-                " options=excluded.options, answer=excluded.answer, analysis=excluded.analysis,"
-                " difficulty=excluded.difficulty, gen_params=excluded.gen_params, source=excluded.source",
-                (r["id"], r.get("bundle_version"), r.get("kid"), r.get("type"),
-                 r["answer_type"], r.get("stem"), r.get("options"), r["answer"],
-                 r.get("analysis"), r.get("difficulty"), r.get("gen_params"), r.get("source")),
-            )
-            n += 1
-        self.conn.commit()
-        return n
+        with self._lock:
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO questions(id, bundle_version, kid, type, answer_type, stem, options,"
+                    " answer, analysis, difficulty, gen_params, source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET bundle_version=excluded.bundle_version, kid=excluded.kid,"
+                    " type=excluded.type, answer_type=excluded.answer_type, stem=excluded.stem,"
+                    " options=excluded.options, answer=excluded.answer, analysis=excluded.analysis,"
+                    " difficulty=excluded.difficulty, gen_params=excluded.gen_params, source=excluded.source",
+                    (r["id"], r.get("bundle_version"), r.get("kid"), r.get("type"),
+                     r["answer_type"], r.get("stem"), r.get("options"), r["answer"],
+                     r.get("analysis"), r.get("difficulty"), r.get("gen_params"), r.get("source")),
+                )
+                n += 1
+            self.conn.commit()
+            return n
 
     def get_question(self, qid: str) -> tuple[str, str] | None:
         """给判定器用的 lookup：返回 (answer_type, answer)，没有则 None。"""
-        row = self.conn.execute(
-            "SELECT answer_type, answer FROM questions WHERE id = ?", (qid,)
-        ).fetchone()
-        return (row["answer_type"], row["answer"]) if row else None
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT answer_type, answer FROM questions WHERE id = ?", (qid,)
+            ).fetchone()
+            return (row["answer_type"], row["answer"]) if row else None
 
     def question_count(self) -> int:
-        return int(self.conn.execute("SELECT COUNT(*) AS c FROM questions").fetchone()["c"])
+        with self._lock:
+            return int(self.conn.execute("SELECT COUNT(*) AS c FROM questions").fetchone()["c"])
 
     def load_kp(self, rows: list[dict]) -> int:
         n = 0
-        for r in rows:
-            self.conn.execute(
-                "INSERT INTO kp(id, title, chapter, subject, exam, related) VALUES(?,?,?,?,?,?) "
-                "ON CONFLICT(id) DO UPDATE SET title=excluded.title, chapter=excluded.chapter,"
-                " subject=excluded.subject, exam=excluded.exam, related=excluded.related",
-                (r["id"], r.get("title"), r.get("chapter"), r.get("subject"),
-                 r.get("exam"), r.get("related")),
-            )
-            n += 1
-        self.conn.commit()
-        return n
+        with self._lock:
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO kp(id, title, chapter, subject, exam, related) VALUES(?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET title=excluded.title, chapter=excluded.chapter,"
+                    " subject=excluded.subject, exam=excluded.exam, related=excluded.related",
+                    (r["id"], r.get("title"), r.get("chapter"), r.get("subject"),
+                     r.get("exam"), r.get("related")),
+                )
+                n += 1
+            self.conn.commit()
+            return n
 
     def kp_count(self) -> int:
-        return int(self.conn.execute("SELECT COUNT(*) AS c FROM kp").fetchone()["c"])
+        with self._lock:
+            return int(self.conn.execute("SELECT COUNT(*) AS c FROM kp").fetchone()["c"])
 
     # ------------------------------------------------------------ 收尾
     def close(self) -> None:
-        self.conn.close()
+        with self._lock:
+            self.conn.close()
 
     def __enter__(self) -> "Store":
         return self

@@ -1,1 +1,380 @@
-"""bridge/api.py —— HTTP 唯一持有者 + 进程入口（python3 -m bridge.api）：token 门 / 限速 / 挂载 /m/* 与 /api/*。"""
+"""bridge/api.py —— HTTP **唯一持有者** + 进程入口（`python3 -m bridge.api`）。
+
+规格：ARCHITECTURE §11.5（路由权威）/ §12（部署）/ §13（配置与凭据）。
+
+规则（与文档一一对应）：
+  · 自有端点恰好三个：`/api/state`、`/api/judge`、`/api/daily`（另有引导端点 `/setup`）
+  · `/api/*` 与 `/m/*` 一律过 **token 门 + 限速**；`/setup` 是**唯一不过门**的例外（它就是换凭证的入口）
+  · 静态面（`/`、`/js/*`、`/assets/*`）**匿名可读**；`web/tests/**` 与任何 dotfile → **403**
+  · 次序：先路径合法性（越权 → 403），后鉴权（`/api/*`、`/m/*` 无 cookie → 401）
+  · token 从 `MATH_DRILL_TOKEN_FILE` 指向的文件读；**缺失或为空 → 拒绝启动**（fail-closed）
+  · 会话 cookie = 派生值 `HMAC-SHA256(key=token, msg="md-session-v1")`（零存储；轮换 token 即失效）
+  · 绑定与端口只读 `config/server.toml`，**没有** CLI / env 覆盖
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import re
+import sys
+import time
+import tomllib
+from dataclasses import dataclass
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from contracts.answer_types import ErrorCode
+from core.judge import JudgeError, judge_by_qid
+from core.registry import Registry
+from core.store import ConflictError, Store
+
+REPO = Path(__file__).resolve().parent.parent
+SESSION_MSG = b"md-session-v1"
+
+
+# ---------------------------------------------------------------- 配置与凭据
+
+@dataclass(frozen=True)
+class Config:
+    bind_host: str
+    port: int
+    static_root: str
+    data_dir: str
+    cookie_name: str
+    cookie_ttl_days: int
+    token_file_env: str
+    api_per_minute: int
+    setup_max_failures: int
+    setup_window_seconds: int
+
+
+def load_config(repo: Path | str = REPO) -> Config:
+    with open(Path(repo) / "config" / "server.toml", "rb") as f:
+        c = tomllib.load(f)
+    s, a, r = c["server"], c["auth"], c["ratelimit"]
+    return Config(
+        bind_host=s["bind_host"], port=int(s["port"]), static_root=s["static_root"],
+        data_dir=s["data_dir"], cookie_name=a["cookie_name"],
+        cookie_ttl_days=int(a["cookie_ttl_days"]), token_file_env=a["token_file_env"],
+        api_per_minute=int(r["api_per_minute"]),
+        setup_max_failures=int(r["setup_max_failures"]),
+        setup_window_seconds=int(r["setup_window_seconds"]),
+    )
+
+
+def load_token(cfg: Config, env: dict | None = None) -> str:
+    """读 token 文件；**缺失或为空 → 拒绝启动**（§13.1，不设默认 token）。"""
+    env = os.environ if env is None else env
+    path = env.get(cfg.token_file_env, "")
+    if not path:
+        raise RuntimeError(f"拒绝启动：环境变量 {cfg.token_file_env} 未设置（见 ARCHITECTURE §13.1）")
+    p = Path(path)
+    if not p.exists():
+        raise RuntimeError(f"拒绝启动：token 文件不存在 {p}")
+    token = p.read_text(encoding="utf-8").strip()
+    if not token:
+        raise RuntimeError(f"拒绝启动：token 文件为空 {p}")
+    return token
+
+
+def session_value(token: str) -> str:
+    """派生式会话值（§13.3）：零存储、可重算、轮换 token 自动失效。"""
+    return hmac.new(token.encode("utf-8"), SESSION_MSG, hashlib.sha256).hexdigest()
+
+
+# ---------------------------------------------------------------- 限速
+
+class RateLimiter:
+    """固定窗口限速（§13.1 尾注的语义）。
+
+    · `/api/*` 与 `/m/*`：**计全部请求**（不论成败）
+    · `/setup`：**只计失败**（成功即清零），窗口内超限 → 429
+    """
+
+    def __init__(self, api_per_minute: int, setup_max_failures: int, window: int) -> None:
+        self.api_limit = api_per_minute
+        self.setup_limit = setup_max_failures
+        self.window = window
+        self._api: dict[str, tuple[float, int]] = {}
+        self._setup: dict[str, tuple[float, int]] = {}
+
+    def hit_api(self, ip: str, now: float | None = None) -> bool:
+        """返回 True 表示放行；False = 429。"""
+        now = time.time() if now is None else now
+        start, count = self._api.get(ip, (now, 0))
+        if now - start >= 60:
+            start, count = now, 0
+        count += 1
+        self._api[ip] = (start, count)
+        return count <= self.api_limit
+
+    def blocked_setup(self, ip: str, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        start, fails = self._setup.get(ip, (now, 0))
+        if now - start >= self.window:
+            self._setup[ip] = (now, 0)
+            return False
+        return fails >= self.setup_limit
+
+    def record_setup_failure(self, ip: str, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        start, fails = self._setup.get(ip, (now, 0))
+        if now - start >= self.window:
+            start, fails = now, 0
+        self._setup[ip] = (start, fails + 1)
+
+    def clear_setup(self, ip: str) -> None:
+        self._setup.pop(ip, None)
+
+
+# ---------------------------------------------------------------- 业务面
+
+class Bridge:
+    """把 store / registry / 配置 绑在一起（handler 用它，不自己碰全局）。"""
+
+    def __init__(self, cfg: Config, token: str, store: Store, registry: Registry) -> None:
+        self.cfg = cfg
+        self.token = token
+        self.cookie_value = session_value(token)
+        self.store = store
+        self.registry = registry
+        self.limiter = RateLimiter(cfg.api_per_minute, cfg.setup_max_failures,
+                                   cfg.setup_window_seconds)
+        self.static_root = (REPO / cfg.static_root).resolve() if not Path(cfg.static_root).is_absolute() \
+            else Path(cfg.static_root).resolve()
+
+    # ---- 工具
+    def cookies(self, handler: BaseHTTPRequestHandler) -> dict[str, str]:
+        raw = handler.headers.get("Cookie", "")
+        out = {}
+        for part in raw.split(";"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                out[k.strip()] = v.strip()
+        return out
+
+    def authed(self, handler: BaseHTTPRequestHandler) -> bool:
+        got = self.cookies(handler).get(self.cfg.cookie_name, "")
+        return hmac.compare_digest(got, self.cookie_value)
+
+    def static_path(self, url_path: str) -> tuple[Path | None, int]:
+        """返回 (文件路径 | None, HTTP 状态)。403 = 越权；404 = 不存在。"""
+        rel = url_path.lstrip("/") or "index.html"
+        rel = rel.split("?", 1)[0]
+        parts = [p for p in rel.split("/") if p]
+        if any(p.startswith(".") for p in parts):      # dotfile 一律 403
+            return None, HTTPStatus.FORBIDDEN
+        if parts and parts[0] == "tests":              # web/tests/** 一律 403
+            return None, HTTPStatus.FORBIDDEN
+        candidate = (self.static_root / rel).resolve()
+        if not str(candidate).startswith(str(self.static_root)):
+            return None, HTTPStatus.FORBIDDEN          # 目录穿越
+        if not candidate.is_file():
+            return None, HTTPStatus.NOT_FOUND
+        return candidate, HTTPStatus.OK
+
+    def judge_request(self, payload: dict) -> tuple[int, dict]:
+        qid = payload.get("qid")
+        raw = payload.get("raw_answer")
+        if not isinstance(qid, str) or not isinstance(raw, str):
+            return HTTPStatus.BAD_REQUEST, {"error": ErrorCode.MALFORMED_REQUEST.value,
+                                            "message": "需要 qid 与 raw_answer（字符串）"}
+
+        def lookup(q: str):
+            found = self.store.get_question(q)
+            if found is None:
+                raise KeyError(q)
+            return found
+
+        try:
+            result = judge_by_qid(qid, raw, lookup=lookup)
+        except JudgeError as exc:
+            status = HTTPStatus.NOT_FOUND if exc.code == ErrorCode.UNKNOWN_QID.value \
+                else HTTPStatus.BAD_REQUEST
+            return status, {"error": exc.code, "message": str(exc)}
+
+        kid_row = self.store.conn.execute("SELECT kid FROM questions WHERE id=?", (qid,)).fetchone()
+        kid = kid_row["kid"] if kid_row else None
+        self.store.record_attempt(qid=qid, kid=kid, result=result,
+                                  user_ms=payload.get("user_ms"), device=payload.get("device"))
+        return HTTPStatus.OK, result
+
+
+# ---------------------------------------------------------------- HTTP
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "math-drill"
+    bridge: Bridge          # 由 make_server 注入（类属性）
+
+    def log_message(self, fmt, *args):        # 默认写 stderr；保持安静，交给 systemd 收 stdout
+        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+
+    # ---- 公共
+    def _send(self, status: int, body: dict, *, extra_headers: list[tuple[str, str]] | None = None):
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        for k, v in (extra_headers or []):
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_file(self, path: Path):
+        ctype = {
+            ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
+            ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
+        }.get(path.suffix, "application/octet-stream")
+        data = path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _read_json(self) -> dict:
+        n = int(self.headers.get("Content-Length") or 0)
+        if n <= 0:
+            return {}
+        try:
+            return json.loads(self.rfile.read(n).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
+
+    # ---- 引导端点（唯一不过 token 门）
+    def _handle_setup(self, query: dict) -> None:
+        b = self.bridge
+        ip = self.client_address[0]
+        if b.limiter.blocked_setup(ip):
+            self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate_limited"})
+            return
+        given = (query.get("t") or [""])[0]
+        if given and hmac.compare_digest(given, b.token):
+            b.limiter.clear_setup(ip)
+            cookie = (f"{b.cfg.cookie_name}={b.cookie_value}; HttpOnly; Secure; "
+                      f"SameSite=Strict; Max-Age={b.cfg.cookie_ttl_days * 86400}; Path=/")
+            self._send(HTTPStatus.FOUND, {"ok": True}, extra_headers=[("Set-Cookie", cookie),
+                                                                     ("Location", "/")])
+            return
+        b.limiter.record_setup_failure(ip)
+        self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})   # 不回显任何信息
+
+    # ---- 路由
+    def _dispatch(self, method: str) -> None:
+        b = self.bridge
+        parsed = urlparse(self.path)
+        path, query = parsed.path, parse_qs(parsed.query)
+        ip = self.client_address[0]
+
+        if path == "/setup":
+            self._handle_setup(query)
+            return
+
+        if path.startswith("/api/") or path.startswith("/m/"):
+            if not b.limiter.hit_api(ip):
+                self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate_limited"})
+                return
+            if not b.authed(self):
+                self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                return
+
+            if path == "/api/state":
+                if method == "GET":
+                    self._send(HTTPStatus.OK, b.store.get_blob())
+                else:
+                    payload = self._read_json()
+                    try:
+                        blob = b.store.put_blob(payload.get("base_version", -1),
+                                                payload.get("data", {}))
+                    except ConflictError as exc:
+                        self._send(HTTPStatus.CONFLICT, {"error": "conflict", "latest": exc.latest})
+                        return
+                    self._send(HTTPStatus.OK, blob)
+                return
+
+            if path == "/api/daily" and method == "GET":
+                blob = b.store.get_blob()
+                self._send(HTTPStatus.OK, {"server_version": blob["server_version"],
+                                           "daily": blob["data"].get("daily")})
+                return
+
+            if path == "/api/judge" and method == "POST":
+                status, body = b.judge_request(self._read_json())
+                self._send(status, body)
+                return
+
+            if path.startswith("/m/"):
+                parts = [p for p in path.split("/") if p]
+                if len(parts) != 3:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+                    return
+                root, name, rpc = parts
+                try:
+                    out = b.registry.dispatch(f"{root}/{name}", rpc, self._read_json(), ctx=b.store)
+                except KeyError as exc:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "no_such_rpc", "message": str(exc)})
+                    return
+                self._send(HTTPStatus.OK, out if isinstance(out, dict) else {"result": out})
+                return
+
+            self._send(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+
+        # 静态面（匿名可读；越权 403）
+        fp, status = b.static_path(path)
+        if status != HTTPStatus.OK or fp is None:
+            self._send(status, {"error": "forbidden" if status == HTTPStatus.FORBIDDEN else "not_found"})
+            return
+        self._send_file(fp)
+
+    def do_GET(self) -> None:
+        self._dispatch("GET")
+
+    def do_POST(self) -> None:
+        self._dispatch("POST")
+
+    def do_PUT(self) -> None:
+        self._dispatch("PUT")
+
+
+def make_server(cfg: Config, bridge: Bridge) -> ThreadingHTTPServer:
+    """建服务（测试用 port=0 拿随机端口；生产读 server.toml）。"""
+    handler = type("BoundHandler", (Handler,), {"bridge": bridge})
+    return ThreadingHTTPServer((cfg.bind_host, cfg.port), handler)
+
+
+def build(repo: Path | str = REPO, *, phase: str = "1") -> tuple[Config, Bridge]:
+    """装配：配置 + token + store + registry（启动失败即抛，不给半活状态）。"""
+    repo = Path(repo)
+    cfg = load_config(repo)
+    token = load_token(cfg)
+    store = Store(cfg.data_dir)
+    registry = Registry(repo, phase=phase)
+    registry.load_all()
+    return cfg, Bridge(cfg, token, store, registry)
+
+
+def main() -> int:
+    cfg, bridge = build()
+    srv = make_server(cfg, bridge)
+    print(f"math-drill 起在 http://{cfg.bind_host}:{srv.server_port}"
+          f"（已装载 {len(bridge.registry.loaded)} 个模块；静态根 {bridge.static_root}）",
+          flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        bridge.store.close()
+        srv.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
