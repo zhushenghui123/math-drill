@@ -110,6 +110,14 @@ class APITestCase(unittest.TestCase):
         status, body, _ = _req(self.url("/api/state"))
         self.assertEqual(status, 401, body)
 
+    def test_01b_cookie_slides_on_use(self) -> None:
+        """滑动续期：已鉴权请求要带回新的 Set-Cookie（永久鉴权的关键）。"""
+        status, _, headers = _req(self.url("/api/state"), cookie=self.cookie)
+        self.assertEqual(status, 200)
+        cookie = headers.get("Set-Cookie", "")
+        self.assertIn(self.cfg.cookie_name, cookie, "已鉴权请求应顺带续期 cookie")
+        self.assertIn("Max-Age=", cookie)
+
     def test_02_with_cookie_ok(self) -> None:
         status, body, _ = _req(self.url("/api/state"), cookie=self.cookie)
         self.assertEqual(status, 200)

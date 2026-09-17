@@ -149,6 +149,12 @@ class Bridge:
             else Path(cfg.static_root).resolve()
 
     # ---- 工具
+    def cookie_header(self) -> str:
+        """下发/续期会话 cookie 的唯一出处（/setup 与「滑动续期」共用，避免两处写法漂移）。"""
+        c = self.cfg
+        return (f"{c.cookie_name}={self.cookie_value}; HttpOnly; Secure; "
+                f"SameSite=Strict; Max-Age={c.cookie_ttl_days * 86400}; Path=/")
+
     def cookies(self, handler: BaseHTTPRequestHandler) -> dict[str, str]:
         raw = handler.headers.get("Cookie", "")
         out = {}
@@ -217,7 +223,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        for k, v in (extra_headers or []):
+        headers = list(extra_headers or [])
+        # 滑动续期（v2.12）：已鉴权的请求顺带把 cookie 的有效期续上。
+        # 为什么需要：浏览器对 cookie 寿命有硬顶（Chrome ≤ 400 天），改大 Max-Age 没用；
+        # 续期后"只要偶尔用一次就永不过期"，配合"token 本身无过期"= 永久鉴权。
+        if getattr(self, "_refresh_cookie", False):
+            headers.append(("Set-Cookie", self.bridge.cookie_header()))
+        for k, v in headers:
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
@@ -254,10 +266,8 @@ class Handler(BaseHTTPRequestHandler):
         given = (query.get("t") or [""])[0]
         if given and hmac.compare_digest(given, b.token):
             b.limiter.clear_setup(ip)
-            cookie = (f"{b.cfg.cookie_name}={b.cookie_value}; HttpOnly; Secure; "
-                      f"SameSite=Strict; Max-Age={b.cfg.cookie_ttl_days * 86400}; Path=/")
-            self._send(HTTPStatus.FOUND, {"ok": True}, extra_headers=[("Set-Cookie", cookie),
-                                                                     ("Location", "/")])
+            self._send(HTTPStatus.FOUND, {"ok": True},
+                       extra_headers=[("Set-Cookie", b.cookie_header()), ("Location", "/")])
             return
         b.limiter.record_setup_failure(ip)
         self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})   # 不回显任何信息
@@ -280,6 +290,7 @@ class Handler(BaseHTTPRequestHandler):
             if not b.authed(self):
                 self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                 return
+            self._refresh_cookie = True      # 通过 token 门 → 本次响应顺带续期
 
             if path == "/api/state":
                 if method == "GET":
