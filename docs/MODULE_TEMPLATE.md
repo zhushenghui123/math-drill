@@ -156,4 +156,5 @@ modules/<模块名>/                 # 目录名 = 模块名（全局唯一，�
 | `vault_export` | 3 | 错题 → Markdown（走决策人已有 vault 管道） | 出网到 Obsidian，不经服务端外发 |
 | `explain_llm` | 5 | 客户端直连 LLM 的讲解通道 | 服务端零代理（红线） |
 | `gamifier` | 1 | 继承 game.js 的 XP/成就设置 | 默认启用（习惯存活） |
+| `qbank` | 3 | 题库查询 / 整合 / 溯源视图（**预留窗口**，现在 rpc 为空） | ⚠️ **不开第二端口**：走既有 bridge 的 `/m/qbank/*`；只读 questions + attempts，不写表、不判定 |
 | `classroom` | 5 | **启用位 false** | 隐藏入口，代码保留 |

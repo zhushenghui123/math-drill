@@ -480,7 +480,8 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   ├── report/                    # [P3] 周度薄弱报告
 │   ├── vault_export/              # [P3] 错题 → Obsidian vault
 │   ├── explain_llm/               # [P5] 讲解通道（客户端直连，服务端零代理）
-│   └── classroom/                 # [P5] enabled=false（D3）
+│   ├── classroom/                 # [P5] enabled=false（D3）
+│   └── qbank/                     # [P3] 题库查询/整合的**预留窗口**（enabled=false、rpc 空；只走 /m/qbank/*）
 ├── generators/                    # 题源插件：每处 = manifest.json + 生成逻辑 + README.md + tests/
 │   ├── linalg_det/                # [P1] 线代 Ch1 行列式（Phase 1 唯一题源，见 T6/M6）
 │   ├── linalg_mat/ … linalg_quad/ # [P4] Ch2-Ch6 —— Phase 1 **不预建**这些目录（T0 只建已列出的 linalg_det / custom_json / textbook_import），P4 按需新增（v2.8 消解省略号歧义）

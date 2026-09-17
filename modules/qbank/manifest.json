@@ -1,0 +1,8 @@
+{
+  "name": "qbank",
+  "phase": "3",
+  "enabled": false,
+  "rpc": [],
+  "blob_fields": [],
+  "description": "题库查询与整合的预留窗口（形态待设计；只走 bridge 的 /m/qbank/*，不开第二个端口）"
+}
