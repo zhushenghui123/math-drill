@@ -510,7 +510,7 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   ├── test_registry.py           # [T3] MANIFEST 校验与装载（被测对象 `core/registry.py` 是 T3 产出；T0 建骨架，v2.9 改标——原标 [T0] 会造成"越界/空壳/红"三解）
 │   └── test_picker.py             # [P2b 先写]
 ├── scripts/                       # gen_bundles.py（打包 bundle）· db_init.py（**建表 + schema_version + 灌 bundle**，T7 部署前置）· backup_check.sh · refcheck.py（**文档自洽护栏，规格见 §14**）
-├── deploy/                        # math-drill.service / caddy.block / backup.timer / logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
+├── deploy/                        # math-drill.service / caddy.block / backup.timer + backup.service（timer 必须配对 oneshot）/ logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
 ├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE
 │                                  #   / MODULE_TEMPLATE / IMPLEMENTATION_BRIEF / DECISIONS
 ├── data/                          # 运行时数据（.gitignore：data/、*.db、*.db-wal）
@@ -573,7 +573,11 @@ math.zhu2006.xyz {
 **操作纪律**：① 改前 `cp Caddyfile Caddyfile.bak-<date>` **并记录原文件 `sha256sum`**（用于回滚校验，见 §12.4⑩）（该目录已 git 化，改动可回滚）② 只追加，不动 `obsidian.*` / `reader.*` 两块 ③ **先 validate 再 reload**：`docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile` 绿了，才执行 `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile` ④ **只准**上面的 `caddy reload` 或 `docker restart <caddy 容器名>`；**禁止 `docker compose up -d` / `docker compose restart` 一类全栈操作**（可能连带重建 CouchDB / dsh-web 容器，直接违反「不得改动既有服务」）⑤ 失败立刻回滚备份。
 **DNS（决策人手动）**：Cloudflare 加 `math.zhu2006.xyz` A 记录 → `101.43.18.37`，**DNS only（灰云）**（与既有规范一致，避免 CF 代理干扰）。
 
-### 12.3 备份与自检（`deploy/backup.timer` + `scripts/backup_check.sh`）
+### 12.3 备份与自检（`deploy/backup.timer` → `deploy/backup.service` → `scripts/backup_check.sh`）
+
+> 注（v2.10 实测补）：systemd 的 timer **必须**有配对的 service 单元，故 deploy/ 下是 4 个文件
+> （timer 只是触发器）。本地已实测：生成 → `integrity_check` ok → 轮转保留 N 份 → 用备份恢复可查。
+> `/var/backups/math-drill/` 需可写（`backup.service` 的 `ReadWritePaths`），数据目录只读即可。
 
 | 项 | 规格 |
 |---|---|

@@ -1,1 +1,15 @@
-# deploy/logrotate.d/math-drill —— 单文件日志轮转，必须 copytruncate（fd 继承写入，见 ARCHITECTURE §12.1 注①）
+# deploy/logrotate.d/math-drill —— 装到 /etc/logrotate.d/math-drill
+#
+# ⚠️ **必须 copytruncate**：日志是 systemd 用 fd 继承写进去的，默认的 create 式轮转会
+# 让进程继续写已改名的旧 inode —— 新日志静默不增长（ARCHITECTURE §12.1 注①）。
+
+/var/log/math-drill.log {
+	daily
+	rotate 7
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+	su math-drill math-drill
+}

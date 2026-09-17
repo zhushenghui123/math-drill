@@ -1,0 +1,20 @@
+# deploy/backup.service —— 被 backup.timer 触发的 oneshot
+# （systemd 的 timer 必须有配对 service；这条是 v2.9 补的树外必需项）
+
+[Unit]
+Description=math-drill 备份（sqlite3 .backup + integrity_check）
+After=math-drill.service
+
+[Service]
+Type=oneshot
+User=math-drill
+Group=math-drill
+ExecStart=/opt/math-drill/scripts/backup_check.sh
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=math-drill
+# 数据目录只读够用（.backup 是读源），备份目录需可写
+ReadWritePaths=/var/backups/math-drill

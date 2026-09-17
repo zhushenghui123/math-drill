@@ -1,2 +1,45 @@
-# deploy/math-drill.service —— systemd 单元（字段表见 ARCHITECTURE §12.1）
-# ExecStart 不带绑定参数；只绑 127.0.0.1:8081
+# deploy/math-drill.service —— systemd 单元（字段表与理由见 ARCHITECTURE §12.1）
+#
+# 三条要点（改了就等于改了部署性质，先看 §12.1）：
+#   · ExecStart **不带绑定参数**：绑定/端口只读 config/server.toml（单源）
+#   · MATH_DRILL_TOKEN_FILE **必须在**：token 缺失或为空 → 进程拒绝启动（fail-closed）
+#   · 只绑 127.0.0.1（公网面只由 Caddy 提供）
+
+[Unit]
+Description=math-drill（考研数学自适应练题）
+Documentation=file:///opt/math-drill/docs/ARCHITECTURE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=math-drill
+Group=math-drill
+WorkingDirectory=/opt/math-drill
+ExecStart=/usr/bin/python3 -m bridge.api
+
+# 凭据注入（§13.1）：路径由 systemd 给，值只存在于 /etc/math-drill/token（600）
+Environment=PYTHONUNBUFFERED=1
+Environment=MATH_DRILL_TOKEN_FILE=/etc/math-drill/token
+
+Restart=on-failure
+RestartSec=5
+
+# 加固（对齐既有 dsh-web 的习惯）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+# systemd 自动创建 /var/lib/math-drill（属主正确）并从 ProtectSystem 豁免；
+# 不要手工 mkdir（§12.1 注②）
+StateDirectory=math-drill
+ReadWritePaths=/var/lib/math-drill
+
+# 单文件日志：该 fd 由 PID 1 在单元命名空间之外打开，故不受 ProtectSystem 限制
+# （§12.1 注①，man 5 systemd.exec 佐证）。轮转必须 copytruncate（见 logrotate.d/math-drill）
+StandardOutput=append:/var/log/math-drill.log
+StandardError=append:/var/log/math-drill.log
+
+[Install]
+WantedBy=multi-user.target

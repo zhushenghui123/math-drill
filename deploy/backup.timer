@@ -1,1 +1,16 @@
-# deploy/backup.timer —— 每日备份 timer（配套 scripts/backup_check.sh）
+# deploy/backup.timer —— 每日备份（跑 deploy/backup.service → scripts/backup_check.sh）
+#
+# 验收（§12.4 ⑪）：systemctl list-timers 对照（既有 timer 未变）+ 手动触发一次
+# backup_check.sh → 退出码 0 且 /var/backups/math-drill/ 出现新文件
+
+[Unit]
+Description=math-drill 每日备份
+
+[Timer]
+# 避开整点：03:17 起，Persistent=错过也补跑
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

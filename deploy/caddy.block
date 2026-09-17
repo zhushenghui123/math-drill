@@ -1,2 +1,15 @@
-# deploy/caddy.block —— 追加到 /root/obsidian-livesync/Caddyfile 的站点块
-# 照 reader.* 的写法（带 tls dns cloudflare），不是照 obsidian.*
+# deploy/caddy.block —— **追加**到 /root/obsidian-livesync/Caddyfile 的站点块
+#
+# 实测（2026-09-17）：Caddy 跑在 Docker 容器 caddy-for-ols（compose 服务名 caddy），
+# 既有两块 obsidian.*（纯 reverse_proxy，无 tls）与 reader.*（有 tls dns cloudflare）。
+# → **照 reader.* 写，不要照 obsidian.***。
+#
+# 操作纪律（§12.2）：改前备份 + 记 sha256 → caddy validate 绿 → caddy reload → 失败即回滚；
+# **禁止** docker compose up -d（会连带重建 CouchDB / dsh-web）。
+
+math.zhu2006.xyz {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	reverse_proxy 127.0.0.1:8081
+}
