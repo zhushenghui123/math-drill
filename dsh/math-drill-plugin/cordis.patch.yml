@@ -1,0 +1,23 @@
+# math-drill 桥接插件的 bundle 补丁（ADR-015 决策 1/3/4）。
+#
+# 安装：`dsh plugin --profile web add <本目录绝对路径>`
+#   → pnpm 把本包装进 profile 的依赖 → loader 按 `dsh.bundle.patch` 声明把它
+#     reconcile 进 `dsh.profile.bundles`，本补丁随 profile 组合生效（不需要手改 profile 文件）。
+#
+# 宿主版本：本补丁只 insert 一行，不覆盖任何官方行（ADR-015 决策 6 的追加纪律）。
+# 凭据：config 里**不放凭据本身**，只有路径/环境变量名 —— 凭据值留在 0600 文件里
+#       （规格 §3.3；BOUNDARY 的凭据纪律）。`!!js` 表达式里 `dshHomePath` 与 `process.env`
+#       都是补丁层的既有能力（见 dsh-web-app 的 cordis.patch.yml 同款用法）。
+
+- insert:
+    - id: math-drill-dsh
+      name: '@math-drill/dsh-plugin'
+      config:
+        # math-drill 服务地址（生产：Caddy 反代后的域名）
+        baseUrl: 'https://math.zhu2006.xyz'
+        # 服务间凭据文件（0600）。留空则只认 credentialEnv。
+        credentialPath: !!js dshHomePath('math-drill/agent-credential')
+        # 环境变量覆盖位（优先级高于文件）；名字里**没有**凭据值
+        credentialEnv: MATH_DRILL_AGENT_CREDENTIAL
+        # 单次请求预算（ms）
+        timeoutMs: 10000

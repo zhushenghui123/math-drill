@@ -5,3 +5,5 @@ references/
 *.db-wal
 __pycache__/
 *.pyc
+# 插件的宿主依赖链接（由 dsh/math-drill-plugin/tools/link-dsh-deps.mjs 生成，可再生产）
+node_modules/

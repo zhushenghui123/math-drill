@@ -6,6 +6,9 @@
   ④ 带 cookie → 200              ⑤ judge 落库（attempts）⑥ 未知 qid → 404
   ⑦ blob 版本冲突 → 409 + 最新 blob ⑧ 限速（api_per_minute）→ 429
   ⑨ 派生式会话：重启服务 cookie 仍有效；换 token 后旧 cookie 失效
+  ⑩ 服务间凭据（ADR-015 决策 3 / 规格 §3.8 用例 1–16）：Bearer → 200 且**不发 cookie**、
+     域分离双向 401、两个桶互不挤爆、未验证 Bearer 落回 IP 桶、桶键不含凭据原文、
+     `/setup` 锁定期内正确 token 也 429、轮换 token ⇒ **两条凭据同时失效**
 """
 
 from __future__ import annotations
@@ -23,7 +26,8 @@ from tempfile import TemporaryDirectory
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from bridge.api import Bridge, load_config, make_server, session_value  # noqa: E402
+from bridge.api import (Bridge, agent_value, load_config, make_server,  # noqa: E402
+                        session_value)
 from core.registry import Registry  # noqa: E402
 from core.store import Store  # noqa: E402
 
@@ -43,13 +47,21 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _req(url: str, *, method: str = "GET", body: dict | None = None,
-         cookie: str | None = None, timeout: float = 5.0, follow: bool = False) -> tuple[int, dict, dict]:
+         cookie: str | None = None, bearer: str | None = None,
+         timeout: float = 5.0, follow: bool = False) -> tuple[int, dict, dict]:
+    """`cookie` / `bearer` 是本测试的**两个独立凭据通道**；都不传 = 匿名。
+
+    注意：这里用裸 `urlopen`（**无 cookie jar**）—— 规格 §3.8 用例 5 要求
+    "Bearer 值当 cookie 用 → 401"必须在无 jar 的前提下测，否则真 cookie 会把用例救活。
+    """
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if body is not None:
         req.add_header("Content-Type", "application/json")
     if cookie:
         req.add_header("Cookie", cookie)
+    if bearer is not None:
+        req.add_header("Authorization", f"Bearer {bearer}")
     try:
         opener = urllib.request.urlopen if follow else _OPENER.open
         with opener(req, timeout=timeout) as r:
@@ -68,7 +80,14 @@ def _req(url: str, *, method: str = "GET", body: dict | None = None,
         return e.code, parsed, dict(e.headers)
 
 
-class APITestCase(unittest.TestCase):
+class ServerCase(unittest.TestCase):
+    """起一个真服务的最小基类 —— **只提供夹具，不含用例**。
+
+    为什么要拆出来：`RateLimitCase` 把额度压到 3/分钟，若它还继承整套契约用例，
+    那些用例会因为**限速**（而非被测性质）变成 429 而假红。夹具与用例集分开后，
+    "限速档"就只跑限速用例。
+    """
+
     token = TOKEN
     api_per_minute = 60
     setup_max_failures = 3
@@ -104,6 +123,15 @@ class APITestCase(unittest.TestCase):
     @property
     def cookie(self) -> str:
         return f"{self.cfg.cookie_name}={session_value(self.token)}"
+
+    @property
+    def bearer(self) -> str:
+        """服务间凭据 —— 用**与服务器同一个函数**派生（规格 §3.8 用例 14 的保真要求）。"""
+        return agent_value(self.token)
+
+
+class APITestCase(ServerCase):
+    """默认额度下的完整契约用例集（继承 ServerCase 的夹具）。"""
 
     # ---- ① 鉴权门
     def test_01_api_requires_cookie(self) -> None:
@@ -221,8 +249,50 @@ class APITestCase(unittest.TestCase):
                                cookie=self.cookie)
         self.assertEqual(status, 404, "phase 2a 的模块在 Phase 1 不该被装载")
 
+    # ---- ⑩ 服务间凭据（ADR-015 决策 3；规格 §3.8 用例 1–16）
+    def test_14_bearer_ok_and_no_cookie_back(self) -> None:
+        """规格 §3.8 用例 3 + **11**：正确 Bearer → 200，且响应**不含 Set-Cookie**。
 
-class RateLimitCase(APITestCase):
+        用例 11 是**唯一能测出 B2 的用例**：滑动续期若无条件置位，持 agent 凭据者
+        一次成功请求就能读到浏览器会话值（§3.2「互不可替代」单向失效）。
+        """
+        status, body, headers = _req(self.url("/api/state"), bearer=self.bearer)
+        self.assertEqual(status, 200, body)
+        self.assertNotIn("Set-Cookie", headers, "agent 路径不得收到浏览器会话 cookie")
+        self.assertEqual(self.bridge.agent_value, agent_value(self.token),
+                         "用例 14 保真：两边派生必须逐字相等")
+
+    def test_15_wrong_bearer_is_401(self) -> None:
+        """规格 §3.8 用例 2（另覆盖"形状不符"的四种头）。"""
+        for bad in ("", "x", self.bearer[:-1], self.bearer.upper()):
+            with self.subTest(bad=bad[:8]):
+                status, _, _ = _req(self.url("/api/state"), bearer=bad)
+                self.assertEqual(status, 401)
+
+    def test_16_domain_separation_both_directions(self) -> None:
+        """规格 §3.8 用例 4 + 5：cookie 值当 Bearer 用 → 401；Bearer 值当 cookie 用 → 401。"""
+        status, _, _ = _req(self.url("/api/state"), bearer=session_value(self.token))
+        self.assertEqual(status, 401, "浏览器会话值不得能当服务间凭据")
+        status, _, _ = _req(self.url("/api/state"),
+                            cookie=f"{self.cfg.cookie_name}={self.bearer}")
+        self.assertEqual(status, 401, "服务间凭据不得能当 cookie（客户端无 jar）")
+
+    def test_17_setup_lockout_blocks_correct_token(self) -> None:
+        """规格 §3.8 用例 15（**专测 B4 那条静默失效**）。
+
+        失败计数与锁定检查若用了不同的键，锁**永不命中**且无报错 —— 这里断言
+        "锁定期内连正确 token 也 429"；若实现改成了 `ip:<ip>` 而写入侧仍是裸 IP，
+        本用例会看到 302/401。
+        """
+        for _ in range(self.setup_max_failures):
+            _req(self.url("/setup?t=wrong"))
+        status, _, _ = _req(self.url(f"/setup?t={self.token}"))
+        self.assertEqual(status, 429, "锁定期内正确 token 也必须 429（否则两侧键不对称）")
+
+
+class RateLimitCase(ServerCase):
+    # ⚠️ 继承 ServerCase 而非 APITestCase：本档把额度压到 3/分钟，
+    # 跑整套契约用例会让"4 次错凭据都该 401"因限速变 429（假红）。
     api_per_minute = 3
 
     def test_12_api_rate_limit(self) -> None:
@@ -233,12 +303,66 @@ class RateLimitCase(APITestCase):
         self.assertEqual(codes[-1], 429, f"超出 api_per_minute 应 429，实际 {codes}")
         self.assertEqual(codes[0], 200)
 
+    def test_18_buckets_are_independent(self) -> None:
+        """规格 §3.8 用例 6 + 7：浏览器桶与 agent 桶**互不挤爆**（同 IP 下也一样）。
+
+        这是分桶维度必须换的直接原因：部署态 `client_address` 恒为 `127.0.0.1`
+        （Caddy 反代在后），按 IP 分桶 = 全站共享一个桶。
+        """
+        for _ in range(self.api_per_minute):
+            self.assertEqual(_req(self.url("/api/state"), cookie=self.cookie)[0], 200)
+        self.assertEqual(_req(self.url("/api/state"), cookie=self.cookie)[0], 429,
+                         "浏览器桶应已打满")
+        self.assertEqual(_req(self.url("/api/state"), bearer=self.bearer)[0], 200,
+                         "浏览器桶满不得影响 agent 桶")
+        for _ in range(self.api_per_minute - 1):
+            self.assertEqual(_req(self.url("/api/state"), bearer=self.bearer)[0], 200)
+        self.assertEqual(_req(self.url("/api/state"), bearer=self.bearer)[0], 429)
+
+    def test_19_unverified_bearer_does_not_buy_new_buckets(self) -> None:
+        """规格 §3.8 用例 12（**测 B1**）：未验证的 Bearer 随便换值 ⇒ 桶数**不增长**。"""
+        for i in range(self.api_per_minute + 2):
+            status, _, _ = _req(self.url("/api/state"), bearer=f"bogus-{i}")
+            self.assertIn(status, (401, 429), "未鉴权请求不该拿到数据")
+        keys = list(self.bridge.limiter._api)
+        self.assertEqual(keys, ["ip:127.0.0.1"], f"未鉴权者换头不得换桶，实际 {keys}")
+
+    def test_20_bucket_keys_carry_no_credential(self) -> None:
+        """规格 §3.8 用例 10：桶键里**不含凭据原文**（限速表会被 dump/日志化）。"""
+        self.assertEqual(_req(self.url("/api/state"), bearer=self.bearer)[0], 200)
+        keys = list(self.bridge.limiter._api)
+        self.assertEqual(len(keys), 1, f"一次 agent 请求应只建一个桶：{keys}")
+        self.assertTrue(keys[0].startswith("agent:"), keys)
+        for secret in (self.token, self.bearer, session_value(self.token)):
+            self.assertNotIn(secret, keys[0])
+
+
+class RotatedTokenCase(APITestCase):
+    """规格 §3.8 用例 8 + 13：轮换 token ⇒ **两条凭据同时失效**（派生红利，无独立吊销）。"""
+
+    token = TOKEN + "-rotated"
+
+    def test_21_rotation_kills_both_credentials(self) -> None:
+        old_cookie = f"{self.cfg.cookie_name}={session_value(TOKEN)}"
+        self.assertEqual(_req(self.url("/api/state"), bearer=agent_value(TOKEN))[0], 401,
+                         "旧服务间凭据必须失效")
+        self.assertEqual(_req(self.url("/api/state"), cookie=old_cookie)[0], 401,
+                         "旧 cookie 必须同时失效（用例 13）")
+        self.assertEqual(_req(self.url("/api/state"), bearer=self.bearer)[0], 200)
+        self.assertEqual(_req(self.url("/api/state"), cookie=self.cookie)[0], 200)
+
 
 class CookieDerivationCase(unittest.TestCase):
     def test_13_cookie_survives_restart_but_dies_on_rotation(self) -> None:
         old = session_value(TOKEN)
         self.assertEqual(old, session_value(TOKEN), "同 token 必须派生出同值（重启不掉登录）")
         self.assertNotEqual(old, session_value(TOKEN + "x"), "换 token 必须换派生值（轮换即失效）")
+
+    def test_22_domain_separation_is_structural(self) -> None:
+        """两域**结构上**不可能相等（msg 不同）—— 域分离不靠"约定"，靠派生式本身。"""
+        self.assertNotEqual(session_value(TOKEN), agent_value(TOKEN), "两条凭据必须不同值")
+        self.assertNotEqual(agent_value(TOKEN), agent_value(TOKEN + "x"), "轮换 ⇒ 服务间凭据也变")
+        self.assertEqual(agent_value(TOKEN), agent_value(TOKEN), "同 token 同域必须稳定（可离线重算）")
 
 
 if __name__ == "__main__":

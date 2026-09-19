@@ -50,7 +50,8 @@
 
 | 通道 | 控制面 | 位置 |
 |---|---|---|
-| 写入 API（state/judge/daily） | 长效 token cookie (HttpOnly+Secure+SameSite=Strict) + rate-limit | server |
+| 写入 API（state/judge/daily） | **凭据门**（两种，v2.15 补第二种）：**浏览器会话 = 长效 token cookie**（HttpOnly+Secure+SameSite=Strict）+ rate-limit；**服务间 = Bearer 凭据**（见下一行）——cookie 已**不再是唯一**控制面 | server |
+| **服务间凭据（Bearer，ADR-015 决策 3）** | 跨网络传输的**长寿命**凭据，**只有 TLS**（无 HttpOnly 可依赖）；**可离线重算**（拿到 token 文件的人都能推出来）；泄露半径 = 该 token 全部权限。**落点与 cookie 不同**：agent 是软件 ⇒ 凭据必须是**可读明文**，会落在 **DSH 配置 / 进程环境 / 会话与工具回显 / 反代错误日志**。域分离派生（`msg=md-agent-v1`），与 cookie **互不可替代**；轮换 token ⇒ 两条同时失效（放弃独立吊销） | server + 客户端 |
 | 静态读取 | **匿名只读**（不加门；`web/tests/**` 与 dotfile 一律 403）——定案见 §13.3「静态面是否过 token 门」；原写「见 §7 开放」为悬空引用（§7 无此项） | bridge |
 | LLM 直连（出网） | 用户自带 key，只走讲解链路；服务端**不设**代理，**永不**存储 key | 客户端 |
 | 运维面 SSH | fail2ban 已在跑（不复述用户职责） | 服务器已有 |
@@ -217,7 +218,7 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 | **2b 选题重写** | ① §5 全部单测先红后绿；② 判定链路无 LLM 参与（审计 grep 证）；③ 真实使用 2 周 |
 | **3 反馈** | 周报字段成型 + 错题准入 Obsidian vault（走已知管道） |
 | **4 题源扩展** | 高数 Ch ≥2 章机动 + sympy 评估报告（此时**才**决策是否引入） |
-| **5 Agent 层** | LLM 讲解 PoC（讲解只在非判定链路）+ 可选 DSH 插件薄客户端 |
+| **5 Agent 层** | **以 DSH 为宿主、考研数学做插件**——形态、分期、鉴权、代价与终态触发条件**全部见 `docs/DECISIONS.md` 的 ADR-015**（本行原写"可选 DSH 插件薄客户端"，v2.13 改指 ADR-015；两者不是同一形态，以 ADR-015 为准）。判定链路无 LLM **不变**。 |
 
 ---
 
@@ -265,6 +266,15 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 | **v2.7** | 2026-09-17 | **第三轮定点修正**（4 条阻塞 + 3 条清单；含 v2.6 补丁自身引入的 2 条）：① §11.9 `config/` 补 `server.toml` + `server.example.toml`（树 ↔ §13 对撞，B1）② `/setup` 定性为**唯一不过 token 门的引导端点**（B2）③ §12.1 `Environment` 补 `MATH_DRILL_TOKEN_FILE` + 增 `StateDirectory` + `data_dir` 改单源（B3a/c/d）④ §13.3 会话值改 **HMAC 派生**（零存储，「轮换即失效」首次真正成立，B4）⑤ 限速语义写死（按 IP / 固定窗口 / **只计失败** / 成功清零，C-1）⑥ 上游 pin `82c0144`（C-2）⑦ §3.5 标注真值归 `contracts/blob_merge.md`（C-3）⑧ T7 验收 6 → **12 项** + 禁止 `docker compose up -d`、`caddy validate` 先行、回滚 sha256 校验。**驳回** B3b（`append:` 日志由 PID 1 在单元命名空间外打开，不受 `ProtectSystem=strict` 限制，`man 5 systemd.exec` 佐证） |
 | **v2.8** | 2026-09-17 | **第四轮复核修复**（2 阻塞 + **13 清单**）——15 处逐条见 `DECISIONS.md`「ADR-012 · v2.8 追加」；此处只点前 6 类：① **端口单源**（§12.1 `ExecStart` 去参，绑定只读 `config/server.toml`）② **施工单 T3 验收**补 `/setup` 例外（原「无例外面」字面不可满足；v2.7 漏改的第三处）③ §13.3 写死静态面与鉴权次序（越权 403 先于鉴权 401，静态面匿名可读）④ §13.3 补 T3 凭据注入合规解（临时 token 文件 + monkeypatch，不落夹具）⑤ 真值树补 `core/exact/__init__.py`（实测：无它 `from core.exact import det` 报 ImportError）、补 `tests/test_registry.py`、Ch2–Ch6 省略号改为「Phase 1 不预建」⑥ 顶层域清单补 `data/`；§1 威胁模型「见 §7 开放」悬空改指 §13.3；限速语义按端点分域。**维持** v2.7 对 B3b 的驳回。⚠️ v2.9 更正：本行表头原写「6 清单」，实为 13（账本漏记 5 条，其中含 logrotate 残值） |
 | **v2.9** | 2026-09-17 | **第四轮定点复核的三条同型回归 + 护栏立项**：① 账本更正（上行的「6 清单」→ 13，并补指针）② `tests/test_registry.py` 从 `[T0]` 改标 **`[T3]`**（`core/registry.py` 是 T3 产出，T0 无被测对象；原并列写法会被读成"越界/空壳/红"三解）③ `config/server.toml` 的 `data_dir` 注释「开发态可覆盖」改为「改本文件即可（无 env/CLI 覆盖）」，与 §13.1 单源口径对齐 ④ **新增 §14：`scripts/refcheck.py` 立项**（三类机械检查 + 豁免表 + 负例自测要求），把四轮来的"改 A 没回扫 B"从人眼核对改为机器红/绿 |
+| **v2.13** | 2026-09-19 | **ADR-015 入库同批**：① **§11.9 真值树新增顶层域 `dsh/`**（DSH 插件集宿主层，形态全以 ADR-015 为准；目录尚未创建）② **三条纪律第 1 条的顶层域清单补 `dsh`** ③ **§6 验收门第 5 行「Agent 层」由"可选 DSH 插件薄客户端"改指 ADR-015** —— 两句不是同一形态。⚠️ **账本更正**：本表此前跳号——`v2.10` / `v2.11` / `v2.12` 三个版本号已在正文中使用（§7 标题、§12.2 注、§13.3 注）却**从未入表**，为既有漂移，此处如实记录，不补造内容。 |
+| **v2.14** | 2026-09-19 | **Bearer 施工前置的仓库侧两处修正（回应 Bearer 设计规格第二轮评审的 L1，与既存泄露面实测）**：① **§13.1 限速语义注①改计数键**：原写「计数键 = 来源 IP」，与 **ADR-015 决策 3「按凭据分桶」正相反**（评审核实 L1：两条**曾同时在本仓库里**，且全文 grep `Bearer\|服务间\|凭据分桶` = 0 命中）⇒ 改为「**按身份分桶**（浏览器/未鉴权 → 来源 IP；**服务间凭据 → `agent:<sha256[:16]>`**）」并**如实标注落地状态**：该档在 Bearer 落地前**实现里是空的**。⚠️ **不改任何数值**（`api_per_minute = 60` 原样）⇒ refcheck 的 C2 单源值清单**不受影响**；本处**无机械护栏**（C2 只比值不查语义），只能靠 ADR 纪律。② **新增实测依据**：部署态 `client_address` 恒为 `127.0.0.1`（反代在后、未读 `X-Forwarded-For`）⇒ 现有"来源 IP"档**退化为单一全局桶**。③ **§13.3⑤ 加实测更正（既存缺陷，登记不修）**：请求行整条进日志 ⇒ `/setup?t=` 的**主 token 已明文落盘 10 次**；文件权限 **0644**；处置待办 = 不记 query + 收 0640 + 显式 `LogFileMode=`。④ **第三轮评审 N1/N2 顺带修正**：§13.1 代码块内 `api_per_minute` 的注释与 `config/server.toml:15` 的「每来源 IP」一并改「**每桶**」（与注① 相隔 8 行、原为自相打架；C2 只比值不查语义 ⇒ 改前改后都全绿，属无护栏处）；§13.3⑤ 注追加 **④「`/setup` 的锁在部署态也是全局的」**（任何人 3 次错 `?t=` ⇒ 对所有人锁 1 小时，含运营者，窗口内无法自救除重启），**键不改但登记在明处**。 |
+| **v2.15** | 2026-09-19 | **ADR-015 决策 3 落地：服务间 Bearer 凭据（施工前置第 4 条完成）**。规格 = `~/workspaces/claude/任务-math-drill-Bearer设计评审-20260919.md`（三轮评审：v1「不可施工，2 阻塞」→ v2「仍不可施工，B3′/B4」→ v3 三问全过 → v3.1 收 7 条清单）。① **凭据派生**：新增 `AGENT_MSG = b"md-agent-v1"` 与 `agent_value()`（域分离；与 `session_value` 同源不同域、互不可推导）② **身份判定单点**：新增 `bearer_of()` / `identity()`（`browser`/`agent`/`anon`）/ `bucket_key()`，`authed()` 改为 `identity != "anon"`（不再自己比 cookie）③ **限速分桶**：`hit_api` 形参 `ip` → `bucket`，唯一调用点 `:321` 改传 `bucket_key(self)`；**`/setup` 三个调用点仍按 IP**（鉴权前的引导入口，改了会静默失效）④ **修既存 B2**：`_refresh_cookie` 由**无条件**改为**仅 `browser`** —— 原实现会把浏览器会话值经 `Set-Cookie` 发给持 agent 凭据者 ⑤ **同批文档回扫（本变更自己的"兄弟项"）**：§1 威胁模型表**新增「服务间凭据」一行并改写 `:53`**；§11.5 两处、§11.9 树注、§13.2 端点表、§13.3 静态面注、T7 验收②、`IMPLEMENTATION_BRIEF` 验收段的「token 门」措辞一并改「**凭据门**」 ⑥ **测试**：`tests/test_api.py` 新增 12 条（规格 §3.8 用例 1–15 的可自动化部分），并**修测试自身结构** —— `RateLimitCase` 原继承整套契约用例，额度压到 3/min 后会把"4 次错凭据都该 401"变成限速 429（假红），故拆出 `ServerCase` 只放夹具。**⚠️ 部署态尚未生效**（仓库已改，服务器仍是旧构建，随下次部署生效）。 |
+
+| **v2.16** | 2026-09-19 | **`dsh/` 骨架落地：桥接插件的宿主半边（ADR-015 分期 Phase A）**。① **目录建成**：`dsh/README.md` + `dsh/math-drill-plugin/`（`package.json` 声明 `dsh.bundle.patch`；`cordis.patch.yml` 只 `insert` 一行；`src/` 五个文件；`tools/link-dsh-deps.mjs`；`tests/`）② **接入面**：`dsh plugin --profile <name> add <本地路径>` ⇒ pnpm 链接 + loader 按 `dsh.bundle.patch` **自动 reconcile 进 `dsh.profile.bundles`**（实测：profile 的 `dsh.profile.bundles` 由 2 → 3 项，`--dump-config` 里出现 `id: math-drill-dsh`）③ **能力**：两个**只读**工具 `math_drill_progress` / `math_drill_today`（Bearer 凭据，0600 文件 + 环境变量覆盖）④ **红线进代码**：`src/client.js` **只有 GET**（写面不存在，ADR-015 决策 5/代价 5）；`src/summarize.js` 的 `stripQuestionAnswers` **剥掉 `/api/daily` 的 `answer`/`analysis`**（agent 在讲解侧，不在答案侧）；⑤ **护栏**：`node --test` **17 条**（凭据纪律 / wire 行为 / 红线 / 接线；含真调 `apply()` 与真 `defineTool`）⑥ **机械护栏补位**：`scripts/refcheck.py` 的 `TOP_DOMAINS` 补 `dsh`（v2.13 登记的"本行的正确性不靠检查器"到此闭合）；`.gitignore` 增 `node_modules/`（插件依赖链接可再生产）。⚠️ **两条实测发现（都是跑出来的，不是读出来的）**：**(a)** `link:` 装的插件**必须自带可解析的 `@deepseek-ai/*`** —— Node 按包的真实路径做父级查找，走不到 `$DSH_HOME/profiles/node_modules`，缺失时**整个插件树拒绝加载**（宿主启动失败，不是"功能没开"）；故有 `tools/link-dsh-deps.mjs`（照生态惯例建插件自己的 `node_modules`，但**不联网**：链到本机 DSH 的同名包，版本必然等于宿主）。**(b)** 本机 `$DSH_HOME/profiles/node_modules` **整目录悬空**（435 条断链，指向已卸载的 AppImage 挂载点 `/tmp/.mount_…`）—— 它只是"扁平回退目录"，**不是真源**；脚本因此改从安装树（`harness-versions/<hash>/packages/*/*`、`vendor/*`）取。⚠️ **部署态与仓库态**：插件读 `https://math.zhu2006.xyz`，服务器仍是 v2.15 之前的构建（Bearer 随下次部署生效）。**Phase B（客户端半边 / UI 槽位面板）未开工**：它需要 DSH 的浏览器构建产物格式（`window.__ModuleLoader__.load`），因此要先装 `tsdown` 工具链 —— 明确**不**手写 `lib/client.js` 包装（那是把构建产物当源码维护）。 |
+
+| **v2.17** | 2026-09-19 | **Bearer 上生产 + 桥接插件装进真实 profile（ADR-015 决策 1/3 的端到端打通）**。① **生产部署面只有一个文件**：先核对 `/opt/math-drill/bridge/api.py` 的 md5 = 本地 `HEAD` 版（`62cb4827`，逐字节相同，**说明服务器无未登记的本地改动**）⇒ 备份为 `api.py.bak-20260919-233619-pre-bearer` ⇒ 覆盖新文件（md5 `592f9f5e`，644 ubuntu:netdev，**用目标机的 `/usr/bin/python3` 3.12 编译 + import 自检通过后**才重启）⇒ `systemctl restart math-drill`。**回滚 = 把 `.bak` 覆盖回去再 restart**（一条命令，见 §12）。② **生产机七项实测**（凭据值在服务器进程内派生，**全程不回显**）：匿名 `/api/state` **401** / 正确 Bearer **200 且响应不含 `Set-Cookie`**（B2 修复生效）/ cookie 值当 Bearer **401** / Bearer 值当 cookie **401** / 真 cookie **200 且仍带 `Set-Cookie`**（滑动续期未受影响）/ `/api/daily` 匿名 401·Bearer 200；静态面 `GET /` 200、`/js/app.js` 200、`/tests/run-all.js` **403**、公网入口 `https://math.zhu2006.xyz/` **200** ⇒ **手机主场景零影响**。③ **服务间凭据落到本机** `~/.dsh/math-drill/agent-credential`（**600**，65 字节；值经 ssh 管道直落文件，**不进任何会话/命令/文档**），并用该文件走**公网**实测 `/api/state`、`/api/daily` 均 200。④ **插件装进真实 web profile**：`dsh plugin --profile web add …/dsh/math-drill-plugin` ⇒ `dsh.profile.bundles` 追加 `@math-drill/dsh-plugin`（**追加在末尾，其余 11 项一字未动**）⇒ `--dump-config` 145 条目含 `math-drill-dsh` ⇒ **真实 profile 启动实测干净无错**（`dsh web --no-open --port 0`）。⚠️ **两条如实登记**：**(a)** 改前已备份 `~/.dsh/profiles/web/package.json` 与 `cordis.patch.yml`（`.bak-20260919-233544-pre-math-drill`）；`pnpm add` 顺带重写了该 profile 的 `pnpm-lock.yaml`（pnpm 自身行为，非手改）。**(b)** 生产机 `/opt/math-drill` 的 `bridge/api.py` 现在**领先其 git HEAD（fb8af77）**——本次是"文件对文件"的部署，工具链里没有 `git pull` 这一步；下次部署时须把这一步补进流程，否则 `git pull` 会静默覆盖它。 |
+
+| **v2.18** | 2026-09-19 | **Phase B 落地：客户端半边（UI 槽位面板）—— ADR-015 分期到此两半俱全**。① **注册点**：`src/client/index.ts` 往 `conversation.input.dock`（**`list` 型 = 追加位**，官方与 ui-goal 都只 append）插一条「考研数学」状态条；**不碰任何 `single` 型槽位**（决策 6）。② **凭据不出宿主**：宿主半边新增只读路由 `GET /math-drill/summary`（`ctx.webServer.register`），浏览器只拿到**已剥掉答案**的文本摘要 —— 服务间凭据永远不进浏览器。③ **构建按生态既有路线**：官方 per-package 预设（`packages/client/tsdown.client.ts`）**不在安装包里**，故按生态惯例**镜像**它到 `tsdown.config.ts`（去掉我们用不到的 CSS Modules 段；loader 契约那三行 banner/intro/footer **逐字照搬**），产物 `lib/client.js` = `window.__ModuleLoader__.load({id, factory})` 包装；`tools/build-client.mjs` 是壳，tsdown **从本机已有的一份链入**（不联网装新依赖）。④ **实测（真机，非推理）**：真实 profile 启动干净；页面 boot graph 含 `@math-drill/dsh-plugin`；`GET /plugins/@math-drill/dsh-plugin/client.js` → **200 / 3285 B / text/javascript**；`GET /math-drill/summary` → `{"ok":true,...}` 回真数据（当时 `server_version=7`、8 道题、**无 answer/analysis**）。⑤ ⚠️ **本批自己引入过一次"宿主起不来"**（如实登记）：我把宿主路由注册的方法名猜成 `ctx.webServer.registerRoute`，真名是 **`register`**（`@deepseek-ai/dsh-host-webserver` 的 `WebServer`）⇒ **真实 profile 启动直接失败**；更糟的是**测试桩用了同一个错名字**，于是测试全绿。**修法（不是改对了就算）**：测试的桩改锚在**真实服务原型**上（`WebServer` / `ToolRuntime`），并加一条**桩自检**用例 —— 真原型上不存在的方法名必须当场抛（本项目"校验器必须先被校验"的第五条的又一次应用）。⑥ **命名更正**：原 `src/client.js`（math-drill HTTP 客户端）改名 `src/math-drill-api.js` —— 生态约定里 `src/client/` 专指**浏览器半边**，同名两义必然误读。⑦ 插件测试 **21 条**（新增：客户端产物 shape 4 项断言 + 摘要路由正/反例 + 桩自检）。 |
 
 ---
 
@@ -424,8 +434,8 @@ math-drill/
 
 - **HTTP 面唯一持有者 = `bridge/api.py`**，且**它就是进程入口**（`python3 -m bridge.api`）。对齐决策人 whale-moe 的 `bridge/control_api.py` 章（一台轻服务器 = 静态资源 + JSON API）。**原 v2.2 的 `core/server.py` 已从树中删除**——它会造成 `core→bridge` 违规边（ADR-010）。`core/registry.py` 仍是被 bridge 调用的装载器。
 - **MANIFEST 不再声明 routes**（撤回 v2.1 §10.C#2 的「注册路由」表述），模块只声明回调 `rpc[]`（函数名清单）；bridge 统一以 **`/m/<module>/<rpc>`** 挂载；**bridge 自有端点恰好三个**：`/api/state`、`/api/judge`、`/api/daily`（⚠️ 原「固定四个」为笔误；§1 图中的 `/api/questions` 是**离线打包路径**，非运行时端点——已修正）。
-- **引导端点 `/setup` 是唯一不过 token 门的入口**（v2.7 补，回应复核 B2）：它就是「换取凭证」的入口，若也过 token 门则永远拿不到 cookie（部署死锁）。它只受 §13.3 的独立限速，不参与统一过滤器；上一句的「恰好三个」专指 `/api/*` 自有端点，**不含 `/setup`**。
-- **安全后果（质检官警告的正解）**：全部 `/m/*` 与 `/api/*` 经 **bridge 单点 token 门 + rate-limit**——test_api.py 现在可以写了（单一过滤器；**唯一例外见上一条**）。
+- **引导端点 `/setup` 是唯一不过凭据门的入口**（v2.7 补，回应复核 B2；**v2.15 措辞对齐**：门里现在有两种凭据）：它就是「换取凭证」的入口，若也过门则永远拿不到 cookie（部署死锁）。它只受 §13.3 的独立限速，不参与统一过滤器；上一句的「恰好三个」专指 `/api/*` 自有端点，**不含 `/setup`**。
+- **安全后果（质检官警告的正解）**：全部 `/m/*` 与 `/api/*` 经 **bridge 单点凭据门 + rate-limit**（凭据 = 浏览器会话 cookie **或** 服务间 Bearer，二者互不可替代；**加鉴权路径不加端点**，见 ADR-015 决策 3）——test_api.py 现在可以写了（单一过滤器；**唯一例外见上一条**）。
 
 ### 11.6 文档卫生定案（S3 中三条 + 一行级全收）
 
@@ -470,7 +480,7 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │       └── README.md
 ├── bridge/
 │   └── api.py                     # ★ 进程入口（python3 -m bridge.api）：HTTP 唯一持有者
-│                                  #   （token 门 + rate-limit + 挂载 /m/* 与三个 /api/*）
+│                                  #   （凭据门 + rate-limit + 挂载 /m/* 与三个 /api/*；v2.15 措辞对齐）
 ├── modules/                       # 一切功能：每处 = manifest.json + module.py + [page.html] + README.md + tests/
 │   ├── practice/                  # [P1] 答题会话
 │   ├── daily/                     # [P1] 每日任务单
@@ -516,11 +526,29 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 ├── data/                          # 运行时数据（.gitignore：data/、*.db、*.db-wal）
 ├── references/                    # 调研/对拍留档（含版权样本）——**.gitignore 排除，不入版本控制**（与 data/ 同待遇，v2.8 消解与 H8「版权数据零入仓」的冲突；不进仓库即不进远端）
 ├── patches/                       # fork 上游补丁留痕（ADR-006 / §10.1；Phase 1 为空占位目录）
+├── dsh/                           # ★ DSH 插件集宿主层（**ADR-015**）：客户端插件（UI 槽位）+ 桥接插件（数据/工具）
+│   ├── README.md                  #   目录定位、安装/凭据步骤、分期（Phase A 已落地 / B 未开工）、已知限制
+│   └── math-drill-plugin/         #   桥接插件（宿主半边，Phase A）：只读数据通路 + 两个 agent 工具
+│       ├── package.json           #   `dsh.bundle.patch` 声明 ⇒ `dsh plugin add` 自动进 profile 的 bundles
+│       ├── cordis.patch.yml       #   bundle 补丁：只 `insert` 一行（不放凭据值，只有路径/环境变量名）
+│       ├── src/index.js           #   cordis 插件：name / inject / Config / apply
+│       ├── src/credential.js      #   服务间凭据读取（0600 校验；**永不打印**）
+│       ├── src/math-drill-api.js  #   只读 HTTP 客户端（只有 GET /api/state、/api/daily —— 无写方法）
+│       ├── src/client/index.ts    #   客户端半边（浏览器）：注册 conversation.input.dock（list 型，追加）
+│       ├── build/web-platform.ts  #   平台模块表（loader 的 require 只能解析表内模块；镜像自生态预设）
+│       ├── tsdown.config.ts       #   客户端产物构建（镜像官方 clientConfig；产物 = __ModuleLoader__ 包装）
+│       ├── tools/build-client.mjs #   `pnpm build` 的壳：调用本机已有的 tsdown（不联网装）
+│       ├── lib/client.js          #   ★ 构建产物（入仓：link: 安装直接用它；改了 src/client 必须重跑 build）
+│       ├── src/summarize.js       #   纯函数核（无 harness 依赖 ⇒ 仓库内可直接测）
+│       ├── src/tools.js           #   `defineTool` 接线层
+│       ├── tools/link-dsh-deps.mjs #  把 `@deepseek-ai/*` 链到本机 DSH（`link:` 装的插件必须自带可解析依赖）
+│       └── tests/                 #   node --test：17 条（凭据纪律 / wire 行为 / 红线 / 接线）
+│                                  #   ⚠️ 目录已创建（v2.16）；refcheck 的 TOP_DOMAINS 已补 `dsh`（v2.16，机械护栏就位）
 ├── README.md  LICENSE  ATTRIBUTION  THIRD_PARTY_NOTICES.md  .gitignore
 ```
 
 **树的三条纪律**（施工时不得自行增删顶层域）：
-1. 顶层域固定为 `core / bridge / modules / generators / contracts / config / web / tests / scripts / deploy / docs / data / references / patches` + 若干仓库文件（v2.8 补 `data/`——它在树里但原清单漏列）。
+1. 顶层域固定为 `core / bridge / modules / generators / contracts / config / web / **dsh** / tests / scripts / deploy / docs / data / references / patches` + 若干仓库文件（v2.8 补 `data/`——它在树里但原清单漏列；**`dsh/` 由 ADR-015 新增**，是本清单唯一新增的顶层域，且**仅此一次**——新增它用的是 ADR 这条合法通道）。
 2. 新增功能一律落在 `modules/`；新增题源一律落在 `generators/`；**不得新增顶层域**。
 3. `web/tests/` 是 node 测试的唯一落点（`run-all.js` 用 `__dirname` 扫描，搬迁必须整目录）。
 
@@ -598,7 +626,7 @@ math.zhu2006.xyz {
 
 ```
 ① systemctl status math-drill → active (running)（若此处就失败：先查 §12.1 注②与 `MATH_DRILL_TOKEN_FILE` 是否注入）
-② curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/state → 401（无 token 被拒，证 token 门生效）
+② curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/state → 401（**无任何凭据**被拒，证凭据门生效；v2.15 补第二种凭据后，这条断言的值没变）
 ③ `/setup` 连续 4 次错误 token → 429（独立限速生效；语义见 §13.1 尾注）
 ④ 经 `/setup?t=<token>` 拿到 cookie 后访问 → 200；手机浏览器打开 https://math.zhu2006.xyz → 做题 2 道
 ⑤ 服务端：attempts 出现 2 行；systemctl restart → 数据仍在**且 cookie 仍有效**（派生式会话，重启不掉登录）
@@ -644,7 +672,7 @@ cookie_ttl_days = 365
 token_file_env = "MATH_DRILL_TOKEN_FILE"
 
 [ratelimit]
-api_per_minute = 60          # /api/* 与 /m/*：每来源 IP 每分钟允许次数（整数）
+api_per_minute = 60          # /api/* 与 /m/*：每**桶**每分钟允许次数；桶键见下方语义注①（整数）
 setup_max_failures = 3       # /setup：窗口内允许的**失败**次数（整数，不用 "3/hour" 这类字符串）
 setup_window_seconds = 3600  # 固定窗口长度
 
@@ -652,7 +680,7 @@ setup_window_seconds = 3600  # 固定窗口长度
 tau_days = 10                     # 回应复核 M/D5：τ 的落点在此，非缺失的 server/config.py
 ```
 
-> **限速语义（v2.7 补 / v2.8 按端点分域，回应复核 C-1 与清单⑥）**：① 计数键 = 来源 IP（N=1 单用户，不做全局计数）② 窗口 = 固定窗口 ③ **`/setup` 只计失败**——成功即清零，故窗口内第 4 次即使携带正确 token 也不会被拒（否则 NAT 邻居连坐、合法用户被自己锁死）④ 而 **`/api/*` 与 `/m/*` 的 `api_per_minute` 计的是全部请求**（不论成败）——这不是互斥而是分域：前者防爆破、后者防滥用 ⑤ 命中 429 后窗口内不再放行 ⑥ 进程重启清零（N=1 可接受，且不会造成锁死）⑦ 参数统一为整数 + 秒。
+> **限速语义（v2.7 补 / v2.8 按端点分域，回应复核 C-1 与清单⑥；v2.14 改计数键 / v2.15 落地 / v2.17 上生产）**：① 计数键 = **按身份分桶**（v2.14 定，v2.15 落地）：**浏览器会话与未鉴权请求 → 来源 IP**；**服务间凭据（Bearer）→ 凭据哈希桶**（`agent:<sha256[:16]>`，桶表内不存凭据原文）。N=1 单用户，不做全局计数。⚠️ **落地状态（v2.17 更新：已上生产并实测）**：**仓库与生产机都已生效** —— `bridge/api.py` 有 `identity()` / `bucket_key()` / `bearer_of()` / `agent_value()`，`hit_api` 形参已由 `ip` 改 `bucket`，唯一调用点 `:321` 改传 `bucket_key(self)`，`/setup` 三个调用点**仍按 IP**（鉴权前的引导入口）；验收 12 条在 `tests/test_api.py` 全绿，另在**生产机**上实测七项：匿名 `/api/state` 401、正确 Bearer 200 **且响应不含 `Set-Cookie`**、cookie 值当 Bearer 401、Bearer 值当 cookie 401、真 cookie 200 且仍带 `Set-Cookie`（滑动续期未受影响）、`/api/daily` 匿名 401 / Bearer 200；静态面与公网入口（`https://math.zhu2006.xyz/` → 200、`/tests/run-all.js` → 403）**零影响**。⚠️ **v2.14 登记的实测依据（仍成立）**：部署态下 bridge 只监听 `127.0.0.1`、其后是 Caddy 反代且实现**未读** `X-Forwarded-For` ⇒ `client_address` 恒为回环地址，**原先的"来源 IP"档实际退化为单一全局桶**（实测 `/var/log/math-drill.log` 全文请求行来源均为 `127.0.0.1`）——这是"分桶维度必须换"的实证，不只是优化。② 窗口 = 固定窗口 ③ **`/setup` 只计失败**——成功即清零，故窗口内第 4 次即使携带正确 token 也不会被拒（否则 NAT 邻居连坐、合法用户被自己锁死）④ 而 **`/api/*` 与 `/m/*` 的 `api_per_minute` 计的是全部请求**（不论成败）——这不是互斥而是分域：前者防爆破、后者防滥用 ⑤ 命中 429 后窗口内不再放行 ⑥ 进程重启清零（N=1 可接受，且不会造成锁死）⑦ 参数统一为整数 + 秒。
 
 ### 13.2 静态根与暴露面
 
@@ -662,7 +690,7 @@ tau_days = 10                     # 回应复核 M/D5：τ 的落点在此，非
 | `web/index.html` | 入口页 | `GET /` → 该文件 |
 | `web/js/**`、`web/assets/**` | 前端资源 | 直接映射（`/js/...`、`/assets/...`） |
 | `web/tests/**` | node 测试 | ⛔ **禁止对外暴露**（403）；同时对任何 dotfile 一律 403 |
-| `/api/state`、`/api/judge`、`/api/daily` | bridge 自有端点（三个） | 经 token 门 + 限速 |
+| `/api/state`、`/api/judge`、`/api/daily` | bridge 自有端点（三个） | 经**凭据门**（浏览器 cookie **或** 服务间 Bearer）+ 限速（桶键按身份，见 §13.1 注①） |
 | `/m/<module>/<rpc>` | 模块 RPC（bridge 统一挂载） | 同上，无例外面 |
 | `/setup` | 一次性凭据入口 | ⚠️ **不过 token 门**（唯一例外——它就是换取凭证的入口）；见 §13.3，**独立限速** |
 
@@ -679,8 +707,16 @@ tau_days = 10                     # 回应复核 M/D5：τ 的落点在此，非
                         → 302 跳转 /  ；失败仅返回 401（不回显任何信息）
 ④ 轮换：重新 ①，然后各设备重走 ③（token 变 ⇒ 派生值变 ⇒ **旧 cookie 自动失效**）
 ⑤ 纪律：token 只出现在 ① 的本地命令与 ③ 的浏览器地址栏（一次性）；**不得写入任何文件、日志、git**
-        服务端日志对 `/setup` 只记「成功/失败 + 来源 IP」，**不记 token 值**
+        服务端日志对 `/setup` 只记「成功/失败 + 来源 IP」，**不记 token 值**  ← ⚠️ v2.14 实测：此承诺现实现未做到，见下注
 ```
+
+> ⚠️ **v2.14 实测更正（既存缺陷，如实登记，不在本次修）**：
+> ① **请求行整条进了日志（含 query 串）** —— `bridge/api.py:251-252` 把 `log_message(fmt, *args)` 的 `fmt % args` 原样写 stderr，而 `BaseHTTPRequestHandler` 传进来的 args 里含 `self.path`；`deploy/math-drill.service:41-42` 又把 stderr `append:` 到 `/var/log/math-drill.log`。实测 `grep -c "GET /setup?t=" /var/log/math-drill.log` = **10** ⇒ **主 token 已明文落盘 10 次**，上句「不记 token 值」被现有实现打破。
+> ② **文件权限 0644**（实测 `stat`：`644 math-drill:math-drill 14354`）—— service 未设 `LogFileMode=`，重建后仍是默认位。
+> ③ **`来源 IP` 这一半在部署态没有信息量**：实测全文 290 行请求行来源**均为 `127.0.0.1`**（Caddy 反代在后、实现未读 `X-Forwarded-For`）。
+> ④ ⚠️ **同一实测在 `/setup` 上是反向后果（v2.14 追加，回应 Bearer 规格第三轮评审 N2）**：`/setup` 的失败计数也走 `client_address[0]`（`:297`/`:302`/`:306`），判据是 `fails >= setup_max_failures`（`bridge/api.py:123`，现值 3 / 3600s）⇒ **部署态这个键也是同一个回环地址 ⇒ 任何人 3 次带错 `?t=` 的请求，就把 `/setup` 对所有人锁一小时（含运营者自己）**；窗口内除重启服务**无法自救**（正确 token 也被 429 挡在门外 —— §13.1 注③ 的「成功即清零」要先过门才谈得上清零）。
+> **此处"键不改"**（鉴权前的引导入口**必须**按 IP 防爆破），但**必须登记**：运营者须知「3 次错就等一小时，或重启服务」。候选修法（**未定案，须走 ADR**）：bridge 只监听回环 ⇒ 可安全采信 Caddy 注入的 `X-Forwarded-For` 首项作为键；或把 429 从静默改为带 `Retry-After`。
+> **处置（待办，与 Bearer 施工同批或独立立项）**：请求行**不记 query**（直接消灭 ①）＋ 权限收紧到 **0640** 并显式设 `LogFileMode=` ③ 轮转产物权限同步核对。**在此之前，本行按"已知未修"读**，不得当作已实现的保证。
 
 > **为什么是派生值而不是随机会话值（v2.7 定案，回应复核 B4）**：随机值要么存内存（重启即掉，且**轮换 token 不会使任何已发 cookie 失效**——④ 的安全性质不成立），要么落库（§3 无 sessions 表，新增表需走 ADR，与 ADR-007/铁律 3 的单源边界摩擦）。派生方案**零存储**：无表、无文件、重启不掉登录、轮换自动失效、可测（`hmac.compare_digest` 恒定时间）。N=1 单用户不需要按设备独立撤销；将来若要，再引入设备注册并写 ADR。
 
@@ -693,7 +729,7 @@ tau_days = 10                     # 回应复核 M/D5：τ 的落点在此，非
 **验收（T3 可测）**：无 cookie 访问 `/api/state` → 401；`/setup` 连续 4 次失败 → 429；
 带 cookie 访问 → 200；`GET /tests/run-all.js` → 403（静态暴露面正确）。
 
-> **静态面是否过 token 门（v2.8 写死，回应清单⑤）**：**不过门**。静态面（`/`、`/js/*`、`/assets/*`、`web/index.html`）**匿名可读**——因为验收预期的是 **403**（路径规则）而不是 401（鉴权失败）；若静态面也过门，`/tests/run-all.js` 就该返回 401，验收条自相矛盾。次序定死：**先路径合法性（越权路径 → 403），后鉴权（`/api/*`、`/m/*` 无 cookie → 401）**。数据 API 与模块 RPC 一律要 cookie。
+> **静态面是否过凭据门（v2.8 写死，回应清单⑤）**：**不过门**。静态面（`/`、`/js/*`、`/assets/*`、`web/index.html`）**匿名可读**——因为验收预期的是 **403**（路径规则）而不是 401（鉴权失败）；若静态面也过门，`/tests/run-all.js` 就该返回 401，验收条自相矛盾。次序定死：**先路径合法性（越权路径 → 403），后鉴权（`/api/*`、`/m/*` 无凭据 → 401）**。数据 API 与模块 RPC 一律要凭据 —— **v2.15 更正**：凭据有**两种**（浏览器会话 cookie / 服务间 Bearer），故原写「一律要 cookie」在 ADR-015 之后**不完整**；两者**互不可替代**，`/setup` 仍是唯一不过门的路由。
 >
 > **T3 测试如何注入凭据（v2.8 补，回应清单⑦）**：H7 禁止把 token 写进夹具，而「缺失/空 → 拒启」又要求 T3 实测失败路径。唯一合规解——测试在临时目录生成一次性 token 文件，用 monkeypatch 把 `MATH_DRILL_TOKEN_FILE` 指向它（夹具里只出现路径与桩值，不出现真实 token）。必须覆盖三条：**环境变量缺失 → 拒启；文件为空 → 拒启；token 不匹配 → 401**。
 

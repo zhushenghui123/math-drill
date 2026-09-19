@@ -32,7 +32,7 @@ from pathlib import Path
 
 TOP_DOMAINS = (
     "core", "bridge", "modules", "generators", "contracts", "config",
-    "web", "tests", "scripts", "deploy", "docs", "data", "references", "patches",
+    "web", "dsh", "tests", "scripts", "deploy", "docs", "data", "references", "patches",
 )
 ROOT_FILES = ("README.md", "LICENSE", "ATTRIBUTION", "THIRD_PARTY_NOTICES.md", ".gitignore")
 

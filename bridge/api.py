@@ -3,12 +3,18 @@
 规格：ARCHITECTURE §11.5（路由权威）/ §12（部署）/ §13（配置与凭据）。
 
 规则（与文档一一对应）：
-  · 自有端点恰好三个：`/api/state`、`/api/judge`、`/api/daily`（另有引导端点 `/setup`）
-  · `/api/*` 与 `/m/*` 一律过 **token 门 + 限速**；`/setup` 是**唯一不过门**的例外（它就是换凭证的入口）
+  · 自有端点恰好三个：`/api/state`、`/api/judge`、`/api/daily`（另有引导端点 `/setup`）——
+    **加鉴权路径不等于加端点**（ADR-015 决策 3：端点集合不变）
+  · `/api/*` 与 `/m/*` 一律过 **凭据门 + 限速**；凭据 = 浏览器会话 cookie **或** 服务间 Bearer，
+    二者**互不可替代**；`/setup` 是**唯一不过门**的例外（它就是换凭证的入口）
   · 静态面（`/`、`/js/*`、`/assets/*`）**匿名可读**；`web/tests/**` 与任何 dotfile → **403**
-  · 次序：先路径合法性（越权 → 403），后鉴权（`/api/*`、`/m/*` 无 cookie → 401）
+  · 次序：先路径合法性（越权 → 403），后鉴权（`/api/*`、`/m/*` **无任何凭据**（cookie 或 Bearer）→ 401）
   · token 从 `MATH_DRILL_TOKEN_FILE` 指向的文件读；**缺失或为空 → 拒绝启动**（fail-closed）
   · 会话 cookie = 派生值 `HMAC-SHA256(key=token, msg="md-session-v1")`（零存储；轮换 token 即失效）
+  · 服务间凭据 = 派生值 `HMAC-SHA256(key=token, msg="md-agent-v1")`（**域分离**：与 cookie 同源不同域，
+    互不可推导 / 互不可替代；ADR-015 决策 3 —— 轮换 token ⇒ 两条一起失效）
+  · 限速桶键按**身份**（§13.1 注①）：浏览器与未鉴权 → `ip:<来源>`；服务间 → `agent:<sha256[:16]>`
+    （桶表内**不存凭据原文**）；`/setup` 仍按来源 IP（鉴权前的引导入口）
   · 绑定与端口只读 `config/server.toml`，**没有** CLI / env 覆盖
 """
 
@@ -36,6 +42,7 @@ from core.store import ConflictError, Store
 
 REPO = Path(__file__).resolve().parent.parent
 SESSION_MSG = b"md-session-v1"
+AGENT_MSG = b"md-agent-v1"          # 服务间凭据的域分离常量（ADR-015 决策 3；≠ SESSION_MSG）
 
 
 # ---------------------------------------------------------------- 配置与凭据
@@ -88,6 +95,16 @@ def session_value(token: str) -> str:
     return hmac.new(token.encode("utf-8"), SESSION_MSG, hashlib.sha256).hexdigest()
 
 
+def agent_value(token: str) -> str:
+    """服务间凭据（ADR-015 决策 3）：与浏览器会话**同源不同域**。
+
+    域分离：msg 与 `SESSION_MSG` 不同 ⇒ 两条凭据互不可推导、互不可替代。
+    派生红利：轮换 token ⇒ 两条**同时自动失效**，无需额外吊销机制。
+    已知取舍：派生式**放弃独立吊销** —— 泄露响应只能是整体轮换（N=1 接受）。
+    """
+    return hmac.new(token.encode("utf-8"), AGENT_MSG, hashlib.sha256).hexdigest()
+
+
 # ---------------------------------------------------------------- 限速
 
 class RateLimiter:
@@ -104,14 +121,14 @@ class RateLimiter:
         self._api: dict[str, tuple[float, int]] = {}
         self._setup: dict[str, tuple[float, int]] = {}
 
-    def hit_api(self, ip: str, now: float | None = None) -> bool:
-        """返回 True 表示放行；False = 429。"""
+    def hit_api(self, bucket: str, now: float | None = None) -> bool:
+        """返回 True 表示放行；False = 429。`bucket` 由 `Bridge.bucket_key` 单点构造。"""
         now = time.time() if now is None else now
-        start, count = self._api.get(ip, (now, 0))
+        start, count = self._api.get(bucket, (now, 0))
         if now - start >= 60:
             start, count = now, 0
         count += 1
-        self._api[ip] = (start, count)
+        self._api[bucket] = (start, count)
         return count <= self.api_limit
 
     def blocked_setup(self, ip: str, now: float | None = None) -> bool:
@@ -142,6 +159,7 @@ class Bridge:
         self.cfg = cfg
         self.token = token
         self.cookie_value = session_value(token)
+        self.agent_value = agent_value(token)
         self.store = store
         self.registry = registry
         self.limiter = RateLimiter(cfg.api_per_minute, cfg.setup_max_failures,
@@ -165,9 +183,39 @@ class Bridge:
                 out[k.strip()] = v.strip()
         return out
 
-    def authed(self, handler: BaseHTTPRequestHandler) -> bool:
+    def bearer_of(self, handler: BaseHTTPRequestHandler) -> str:
+        """取 `Authorization: Bearer <值>` 的值；无此头或形状不符 ⇒ `""`（绝不抛）。"""
+        raw = handler.headers.get("Authorization", "")
+        prefix = "bearer "
+        if raw[:len(prefix)].lower() == prefix:
+            return raw[len(prefix):].strip()
+        return ""
+
+    def identity(self, handler: BaseHTTPRequestHandler) -> str:
+        """每请求的**身份判定单点**（§3.4）：返回 `browser` / `agent` / `anon`。
+
+        为什么必须单点且必须先于限速：桶键若采信**未验证**的头，未鉴权者每换一个
+        Authorization 值就换一个新桶 ⇒ 限速形同虚设（评审 B1）。故只有**已验证**的
+        凭据才分档，其余一律 `anon`（回落 IP 桶）。
+        两条路径都用 `hmac.compare_digest`（常数时间）；同时有效时判 `browser`（它确实是浏览器）。
+        """
         got = self.cookies(handler).get(self.cfg.cookie_name, "")
-        return hmac.compare_digest(got, self.cookie_value)
+        if got and hmac.compare_digest(got, self.cookie_value):
+            return "browser"
+        bearer = self.bearer_of(handler)
+        if bearer and hmac.compare_digest(bearer, self.agent_value):
+            return "agent"
+        return "anon"
+
+    def bucket_key(self, handler: BaseHTTPRequestHandler) -> str:
+        """限速桶键（§3.5）：已验证的服务间凭据用**哈希桶**（表内不存原文），其余按来源 IP。"""
+        if self.identity(handler) == "agent":
+            return "agent:" + hashlib.sha256(self.agent_value.encode("utf-8")).hexdigest()[:16]
+        return "ip:" + handler.client_address[0]
+
+    def authed(self, handler: BaseHTTPRequestHandler) -> bool:
+        """凭据门：cookie **或** 服务间 Bearer（判定收敛在 `identity`，此处只做二值化）。"""
+        return self.identity(handler) != "anon"
 
     def static_path(self, url_path: str) -> tuple[Path | None, int]:
         """返回 (文件路径 | None, HTTP 状态)。403 = 越权；404 = 不存在。"""
@@ -311,20 +359,21 @@ class Handler(BaseHTTPRequestHandler):
         b = self.bridge
         parsed = urlparse(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
-        ip = self.client_address[0]
 
         if path == "/setup":
             self._handle_setup(query)
             return
 
         if path.startswith("/api/") or path.startswith("/m/"):
-            if not b.limiter.hit_api(ip):
+            if not b.limiter.hit_api(b.bucket_key(self)):
                 self._send(HTTPStatus.TOO_MANY_REQUESTS, {"error": "rate_limited"})
                 return
             if not b.authed(self):
                 self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                 return
-            self._refresh_cookie = True      # 通过 token 门 → 本次响应顺带续期
+            # 滑动续期**只对浏览器**（评审 B2）：无条件置位会把浏览器会话值
+            # 经 Set-Cookie 发给持 agent 凭据者 ⇒ §3.2 的"互不可替代"单向失效。
+            self._refresh_cookie = b.identity(self) == "browser"
 
             if path == "/api/state":
                 if method == "GET":

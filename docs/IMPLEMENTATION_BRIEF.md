@@ -115,7 +115,7 @@
 - **规格**：ARCHITECTURE §11.5
 - **产出**：`bridge/api.py`（**唯一 HTTP 面 + 进程入口**）+ `core/registry.py`（装载器，被 bridge 调用；⚠️ 原写 `core/server.py` 已于 ADR-010 删除，不得创建）+ `tests/test_api.py`
 - **规格补充**：token 门与 `/setup?t=` 下发、静态根与 403 规则、`config/server.toml` 读取——**全部见 ARCHITECTURE §13**
-- **验收**：`/api/{state,judge,daily}` 可用；`/m/<module>/<rpc>` 由 bridge 统一挂载；**除引导端点 `/setup` 外**，全部路由过统一 token 门 + rate-limit；静态面匿名只读、越权路径一律 403（`/setup` 是唯一例外——它就是换取凭证的入口。见 ARCHITECTURE §11.5 / §13.2 / §13.3。原写「无例外面」为漏改，v2.8 修正）；**限速可测**：循环请求 `/api/state` 超过 `api_per_minute` → 429（v2.8 补清单⑥）
+- **验收**：`/api/{state,judge,daily}` 可用；`/m/<module>/<rpc>` 由 bridge 统一挂载；**除引导端点 `/setup` 外**，全部路由过统一**凭据门** + rate-limit；静态面匿名只读、越权路径一律 403（`/setup` 是唯一例外——它就是换取凭证的入口。见 ARCHITECTURE §11.5 / §13.2 / §13.3。原写「无例外面」为漏改，v2.8 修正）；**限速可测**：循环请求 `/api/state` 超过 `api_per_minute` → 429（v2.8 补清单⑥）；**服务间凭据可测**（v2.15 补，ADR-015 决策 3）：`Authorization: Bearer <agent_value(token)>` → 200 且响应**不含 Set-Cookie**；cookie 值与 Bearer 值**互用必 401**；浏览器桶与 agent 桶**互不挤爆**；未验证 Bearer 换值**不换桶**
 - **证据**：`test_api.py` 全绿 + 一条「无 token 请求被拒」的实测输出
 
 ### T4 · 前端接线（fork 改造，最小面）

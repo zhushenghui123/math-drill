@@ -12,7 +12,7 @@ cookie_ttl_days = 365
 token_file_env = "MATH_DRILL_TOKEN_FILE"
 
 [ratelimit]
-api_per_minute = 60          # /api/* 与 /m/*：每来源 IP 每分钟允许次数（全部请求）
+api_per_minute = 60          # /api/* 与 /m/*：每**桶**每分钟允许次数，桶键见 ARCHITECTURE §13.1 语义注①（全部请求）
 setup_max_failures = 3       # /setup：窗口内允许的失败次数（只计失败）
 setup_window_seconds = 3600
 
