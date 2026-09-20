@@ -31,6 +31,23 @@ dsh/
 
 ## 安装（本机 DSH）
 
+### 在**干净的本地测试环境**里验证（推荐，2026-09-20 起）
+
+不要拿装了十几个插件的日常 DSH 去验证我们自己的插件（"我们的问题"和"别人的问题"会混在一起）。
+用这个脚本起一个**独立 DSH_HOME + 最小 profile**（只 `@deepseek-ai/dsh-base` + `dsh-web-app` + 我们的插件），
+等价于把服务器上的**轻量新环境**搬到本机，**完全不碰你的 `~/.dsh`**：
+
+```bash
+bash dsh/tools/local-test-env.sh          # 建/刷新（幂等）：链接依赖 → 建 profile → 复制凭据(600) → 组合树自检
+bash dsh/tools/local-test-env.sh start    # 后台启动（默认 http://127.0.0.1:39192，避开你日常的 39191）
+bash dsh/tools/local-test-env.sh check    # 冒烟：首页 / boot roster / 客户端产物 / 状态路由
+bash dsh/tools/local-test-env.sh stop     # 停掉
+```
+
+可用环境变量：`DSH_HOME`（默认 `~/dsh-math-test`）、`PORT`（默认 `39192`）、`CREDENTIAL`（默认从 `~/.dsh/math-drill/agent-credential` 复制）。
+脚本里所有 `DSH_HOME` **必须 export** —— 踩过一次：只赋 shell 变量时 `dsh plugin add` 会跑到真实 `~/.dsh` 上，
+于是"干净 profile"根本没建、而自检还在真 profile 上"通过"。
+
 > **开发环 vs 交付**：迭代时用 `dsh web --patch dsh/math-drill-plugin/cordis.patch.yml`（官方推荐的 overlay 方式，
 > 不必先装进 profile，改完重启即可）；`dsh plugin add` 是**交付**动作。
 > **任何插件改动都要重启 `dsh web` 才生效**——加载器图在进程启动时冻结。

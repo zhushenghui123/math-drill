@@ -98,7 +98,10 @@ function harnessRoot() {
  * @returns {Map<string, string>}
  */
 function indexHarnessPackages(root) {
-  const wanted = new Set(REQUIRED)
+  // ⚠️ 白名单必须含 **TEST_REQUIRED**：2026-09-20 实测踩过 —— 只写 REQUIRED 时，
+  // 那两份测试用包只能靠 profile 的扁平回退目录解析，而该目录是指向 AppImage 挂载点的
+  // 临时链接（桌面端一退出就断）⇒ 桌面端没在跑时 setup 直接失败。
+  const wanted = new Set([...REQUIRED, ...TEST_REQUIRED])
   const found = new Map()
   /** @type {string[]} */
   const candidates = []
@@ -202,7 +205,13 @@ function main() {
  */
 function findLocalPackage(name) {
   const found = []
-  const queue = [{ dir: dshHome(), depth: 0 }]
+  // 搜索根要**两个都找**：真实 home（第三方插件与它们的 pnpm store 在那儿）
+  // + 当前 $DSH_HOME（可能是测试环境）。2026-09-20 踩过：只搜 $DSH_HOME 时，
+  // 在干净的测试 home 里找不到 tsdown（它住在 ~/.dsh/dsh-browser 的 store 里）。
+  const realHome = join(homedir(), '.dsh')
+  const configured = dshHome()
+  const roots = configured === realHome ? [realHome] : [realHome, configured]
+  const queue = roots.map((dir) => ({ dir, depth: 0 }))
   while (queue.length > 0) {
     const { dir, depth } = queue.pop()
     if (depth > 6) continue
