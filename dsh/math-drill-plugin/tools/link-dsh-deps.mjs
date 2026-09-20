@@ -42,6 +42,7 @@ const REQUIRED = [
 const TEST_REQUIRED = [
   '@deepseek-ai/dsh-host-webserver',
   '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/dsh-commands',
 ]
 
 /**

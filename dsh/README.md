@@ -91,6 +91,8 @@ chmod 600 ~/.dsh/math-drill/agent-credential
   （本轮吃过一次：改了源码没重建，测试立刻红）。
 - **工具卡片（C2，已落地）**：`math_drill_progress` / `math_drill_today` 的结果在对话里是卡片
   （keyed `tool.call.toolview`，key = wire 工具名）。**注意 keyed 命中会替换通用行** —— 卡片必须自己渲染输出。
+- **斜杠命令（C4，已落地）**：`/math`（进度）· `/math today`（今日题单）· 其它参数报用法。
+  同样按"可选服务"处理：`ctx.get('commands')`，没有就只少一条命令，不拖住工具与路由。
 - **明确不做的**（2026-09-20 评审定案）：`dsh.client.immediately: true`（那是基础设施行专用）；
   换槽位到 `conversation.composer.dock`（它带 `!hero` 守卫，会在"刚开新会话"时消失）。
 - ⚠️ **两条"别按一致性顺手改"的取舍**（详见 `math-drill-plugin/README.md` 的"已知取舍"节）：

@@ -29,6 +29,11 @@ export const name = 'math-drill-dsh'
 export const inject = ['tools', 'webServer']
 
 /**
+ * `/math` 斜杠命令的用法提示（也用于参数不认识时的报错文本）。
+ */
+export const MATH_COMMAND_USAGE = '用法：/math（看进度）· /math today（看今日题单）'
+
+/**
  * 插件配置（部署间可变量；wire contract 固定）。
  * @typedef {object} Config
  * @property {string} baseUrl - math-drill 服务根。
@@ -131,6 +136,38 @@ export async function apply(ctx, config) {
     },
   }
   ctx.effect(() => ctx.webServer.register(route), `${name}: ${STATE_PATH}`)
+
+  // ---- `/math` 斜杠命令（C4）
+  // 契约（本机 0.1.1-rc.1 逐字核过）：`ctx.commands.register({ name, description, input:{hint}, handler })`，
+  // handler 收 `CommandInvocation{ commandId, agent, rawInput, attachments, signal }`，
+  // 返回 `{ kind:'success', text? }` 或 `{ kind:'error', text }`
+  // （`packages/interaction/commands/src/index.ts:34-48`、`…/types.ts:27-34`；名称须匹配 `^[a-z][a-z0-9_-]*$`，`:28`）。
+  // ⚠️ `commands` **不写成 inject**：与 locale 同一条教训 —— 硬 inject 会在缺该服务的宿主上把
+  //    **工具与路由一起拖住**（静默不激活）；这里用 `ctx.get('commands')`，没有就只少一条命令。
+  const commands = typeof ctx.get === 'function' ? ctx.get('commands') : undefined
+  if (commands !== undefined) {
+    const definition = {
+      name: 'math',
+      description: '考研数学：看进度，或看今天该做哪些题（只读）',
+      input: { hint: '[today]' },
+      handler: async (invocation) => {
+        const argument = String(invocation?.rawInput ?? '').trim().toLowerCase()
+        try {
+          const mathDrill = client()
+          if (argument === '' || argument === 'progress') {
+            return { kind: 'success', text: summarizeProgress(await mathDrill.state()) }
+          }
+          if (argument === 'today') {
+            return { kind: 'success', text: summarizeDaily(await mathDrill.daily()) }
+          }
+          return { kind: 'error', text: MATH_COMMAND_USAGE }
+        } catch (error) {
+          return { kind: 'error', text: explain(error, resolved).message }
+        }
+      },
+    }
+    ctx.effect(() => commands.register(definition), `${name}: /math`)
+  }
 
   ctx.logger?.info?.(`${name}: 已注册 ${MATH_DRILL_TOOL_NAMES.join(' / ')}（只读；baseUrl=${resolved.baseUrl}）`)
 }

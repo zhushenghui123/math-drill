@@ -23,6 +23,7 @@ import { STATE_PATH, STATE_SCHEMA_VERSION } from '../src/shared/contract.js'
 // 而桩用了同一个错名字 ⇒ 测试全绿、**真实 profile 启动失败**。
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import Commands from '@deepseek-ai/dsh-commands'
 
 const CREDENTIAL = 'wiring-test-credential-0123456789abcdef'
 const QUESTION = {
@@ -62,13 +63,19 @@ function fakeContext() {
   const logs = []
   const toolCalls = []
   const serverCalls = []
+  const commandCalls = []
   return {
     effects,
     logs,
     toolCalls,
     serverCalls,
+    commandCalls,
     tools: serviceStub(ToolRuntime, 'tools', toolCalls),
     webServer: serviceStub(WebServer, 'webServer', serverCalls),
+    // commands 是**可选**服务：按契约用 ctx.get 取（不声明 inject）
+    get: (serviceName) => (serviceName === 'commands'
+      ? serviceStub(Commands, 'commands', commandCalls)
+      : undefined),
     effect(factory, label) {
       effects.push(label)
       const dispose = factory()
@@ -146,7 +153,8 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     const ctx = fakeContext()
     await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'missing') })
     assert.deepEqual(registeredVia(ctx.toolCalls).map((tool) => tool.name), ['math_drill_progress', 'math_drill_today'])
-    assert.equal(ctx.effects.length, 3, '每个工具 + 路由都要有自己的 effect（卸载即注销）')
+    assert.equal(ctx.effects.length, 4, '两个工具 + 路由 + 命令 各一个 effect（卸载即注销）')
+    assert.deepEqual(registeredVia(ctx.commandCalls).map((command) => command.name), ['math'])
     assert.deepEqual(registeredVia(ctx.serverCalls).map((route) => [route.kind, route.path]), [['exact', STATE_PATH]])
     for (const tool of registeredVia(ctx.toolCalls)) {
       assert.ok(tool.description.length > 20, '工具描述要够长，模型才知道何时用')
@@ -228,5 +236,51 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     const error = await registeredVia(ctx.toolCalls)[0].execute({}, {}).then(() => null, (thrown) => thrown)
     assert.match(error.message, /权限过宽/)
     assert.equal(error.message.includes(CREDENTIAL), false)
+  })
+})
+
+describe('/math 斜杠命令（C4）', () => {
+  it('三个分支都对：空参看进度、today 看题单、别的参数报用法', async () => {
+    const path = join(credDir, 'credential-cmd')
+    writeFileSync(path, `${CREDENTIAL}\n`, { mode: 0o600 })
+    chmodSync(path, 0o600)
+    const ctx = fakeContext()
+    await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: path })
+    const command = registeredVia(ctx.commandCalls)[0]
+    assert.equal(command.name, 'math')
+    assert.ok(command.description.length > 8)
+
+    const progress = await command.handler({ rawInput: '' })
+    assert.equal(progress.kind, 'success')
+    assert.match(progress.text, /数学一|轨道/)
+    assert.equal(progress.text.includes(QUESTION.answer), false, '答案不得进命令输出')
+
+    const today = await command.handler({ rawInput: ' today ' })
+    assert.equal(today.kind, 'success')
+    assert.match(today.text, /三阶行列式/)
+    assert.equal(today.text.includes(QUESTION.answer), false)
+    assert.equal(today.text.includes('按第一行展开'), false)
+
+    const wrong = await command.handler({ rawInput: 'nonsense' })
+    assert.equal(wrong.kind, 'error')
+    assert.match(wrong.text, /用法/)
+  })
+
+  it('缺凭据时报错而不是抛（命令面板里要看得懂）', async () => {
+    const ctx = fakeContext()
+    await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'missing-cmd') })
+    const result = await registeredVia(ctx.commandCalls)[0].handler({ rawInput: '' })
+    assert.equal(result.kind, 'error')
+    assert.match(result.text, /凭据/)
+    assert.equal(result.text.includes(CREDENTIAL), false)
+  })
+
+  it('宿主没有 commands 服务 ⇒ 工具与路由照常注册，只是少一条命令', async () => {
+    const ctx = fakeContext()
+    ctx.get = () => undefined                       // 模拟没有 commands 的宿主
+    await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'x') })
+    assert.equal(registeredVia(ctx.toolCalls).length, 2, '工具必须照常注册')
+    assert.equal(registeredVia(ctx.serverCalls).length, 1, '路由必须照常注册')
+    assert.equal(registeredVia(ctx.commandCalls).length, 0, '没有服务就不注册命令')
   })
 })

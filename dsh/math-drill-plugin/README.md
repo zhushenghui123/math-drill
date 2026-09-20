@@ -119,9 +119,23 @@ node --test tests/               # 28 条：凭据纪律 / wire / 红线 / 接�
 > ⚠️ **升级宿主 DSH 前**：`build/web-platform.ts` 的 `PLATFORM_MODULES` 是**快照不是契约**（ADR-015 代价 1）。
 > 若新版把 `@deepseek-ai/dsh-client-ui-slots` / `dsh-client-locale` 移出表，客户端产物会**当场抛错、状态条整块不出现**。
 
+### `/math` 斜杠命令（C4，2026-09-20 落地）
+
+| 用法 | 结果 |
+|---|---|
+| `/math` 或 `/math progress` | 回一段**进度**（轨道 / 剩余天数 / 今日完成度 / 打卡 / 卡片数） |
+| `/math today` | 回**今日题单**（题干、考点、难度、选项；**答案与解析不在内**） |
+| 其它参数 | `{kind:'error'}` + 用法提示 |
+
+契约（本机 0.1.1-rc.1 逐字核过）：`ctx.commands.register({ name, description, input:{hint}, handler })`，
+handler 收 `CommandInvocation{ commandId, agent, rawInput, attachments, signal }`、返回
+`{kind:'success', text?}` / `{kind:'error', text}`（`packages/interaction/commands/src/index.ts:34-48`、
+`…/types.ts:27-34`）。
+⚠️ **`commands` 走 `ctx.get`，不写成 `inject`** —— 与 locale 同一条教训：硬 inject 会在缺该服务的宿主上
+把**工具与路由一起拖住**（静默不激活）；现在没有它只是少一条命令（有测试盯着这条路径）。
+
 ## 还没做
 
 - **C3 设置页**（`settings.section`）：把 `baseUrl` / 凭据路径搬进设置界面。
-- **C4 斜杠命令**（如 `/math`）：契约点在 `packages/extensions/ui-cordis/src/client/index.ts:168` 的 `slash.registerSource`。
-
-三条都**要求先查契约再动手**（官方 Skill 的原话：不要从服务名/槽位名/示例反推 API）。
+- （原 C4 已落地，见上。）
+- 任何后续项都**要求先查契约再动手**（官方 Skill 原话：不要从服务名 / 槽位名 / 示例反推 API）。
