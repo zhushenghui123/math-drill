@@ -232,6 +232,89 @@ def check_c1(repo: Path, docs: Path) -> list[str]:
 
 # ---------------------------------------------------------------- C2
 
+# ---- C2b：端点集合与计数短语（v2.28 新增；评审第四轮 G1/G2 的产物）
+#
+# 扫描范围（**唯一口径**）：全仓 markdown + `bridge/api.py`。
+#   · 误报由**语境词**挡（`/api/`、`bridge`、`自有端点`、`端点集合`）—— 实测全仓盲扫 `恰好\d+`
+#     会撞三处无关命中（`docs/BOUNDARY.md:14`「每考点恰好 3 题」、本文件、插件测试）。
+#   · 历史留档由**段级排除表**挡（`_historical_lines` + ADR 段：旧 ADR/变更记录是快照，不该改）。
+#     ⚠️ **代价**：段级会连该段今后任何 live 声明一起静默 ⇒ 排除段只认现成的 heading 标记，
+#     **新增 live 声明不得写进这些段**（否则护栏对它视而不见）。
+#   · **"四处"是必检项，不是扫描边界**：把它当边界会让排除表空转、并让检查器看不见第五处。
+ENDPOINT_SET_EXPECTED = ("/api/daily", "/api/judge", "/api/state")
+# 已知**非**运行时端点（实测首跑就抓到这一条）：白名单必须带理由，否则它会变成第二个"学会无视"。
+NON_ENDPOINT_ALLOWLIST = {
+    "/api/questions": "离线打包路径，非运行时端点（docs/ARCHITECTURE.md:454 的括注已写明）",
+}
+ENDPOINT_CONTEXT_WORDS = ("/api/", "bridge", "自有端点", "端点集合")
+_CN_NUMBERS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+ENDPOINT_COUNT_RE = re.compile(
+    r"恰好\s*([一二三四五六七八九十\d]+)\s*个"
+    r"|端点[（(]\s*([一二三四五六七八九十\d]+)\s*[）)]"
+    r"|自有端点\s*[（(]([一二三四五六七八九十\d]+)[）)]"
+)
+
+
+def _excluded_line(rel: str, text: str, ln: int) -> bool:
+    """段级排除：变更记录/历史小节（任何 md）+ DECISIONS.md 的 ADR 段（历史快照）。"""
+    if ln in _historical_lines(text):
+        return True
+    if rel.endswith("DECISIONS.md"):
+        in_adr = False
+        for i, line in enumerate(text.splitlines(), 1):
+            if i > ln:
+                break
+            if line.startswith("## ADR-"):
+                in_adr = True
+            elif line.startswith("## ") and not line.startswith("## ADR-"):
+                in_adr = False
+        return in_adr
+    return False
+
+
+def _endpoint_set_problems(texts: dict[str, str]) -> list[str]:
+    """端点名单（`/api/*` 集合）与计数短语是否与期望一致。"""
+    problems: list[str] = []
+    names_seen: set[str] = set()
+    for rel, text in texts.items():
+        for ln, line in enumerate(text.splitlines(), 1):
+            if not any(w in line for w in ENDPOINT_CONTEXT_WORDS):
+                continue
+            if _excluded_line(rel, text, ln):
+                continue
+            found = {
+                name for name in re.findall(r"/api/[a-z][a-z0-9_-]*", line)
+                if name not in NON_ENDPOINT_ALLOWLIST
+            }
+            if len(found) >= 2:                      # 名单句（列了 ≥2 个端点）
+                names_seen |= found
+            for m in ENDPOINT_COUNT_RE.finditer(line):
+                word = next(g for g in m.groups() if g)
+                n = _CN_NUMBERS.get(word, int(word) if word.isdigit() else None)
+                if n is not None and n != len(ENDPOINT_SET_EXPECTED):
+                    problems.append(
+                        f"{rel}:{ln} 计数短语「{m.group(0)}」= {n}，"
+                        f"但端点集合是 {len(ENDPOINT_SET_EXPECTED)} 个 → 名单与计数不符"
+                    )
+    if names_seen and names_seen != set(ENDPOINT_SET_EXPECTED):
+        missing = sorted(set(ENDPOINT_SET_EXPECTED) - names_seen)
+        extra = sorted(names_seen - set(ENDPOINT_SET_EXPECTED))
+        problems.append(
+            f"端点名单与期望不一致：缺 {missing or '无'}／多 {extra or '无'}"
+            "（改名单必须同批改 §11.5 主句、§13.2 表、bridge/api.py docstring 三处）"
+        )
+    return problems
+
+
+def check_c2b(repo: Path) -> list[str]:
+    texts = {}
+    for rel in ("docs/ARCHITECTURE.md", "docs/DECISIONS.md", "bridge/api.py"):
+        p = repo / rel
+        if p.exists():
+            texts[rel] = p.read_text(encoding="utf-8")
+    return _endpoint_set_problems(texts)
+
+
 def check_c2(repo: Path, docs: Path) -> list[str]:
     problems: list[str] = []
     arch = docs / "ARCHITECTURE.md"
@@ -378,6 +461,27 @@ def _fixture(tmp: Path, *, docs_extra: str = "", tree: str = TINY_TREE,
 
 def selftest() -> int:
     failures = []
+    # ---- C2b：端点集合与计数短语（v2.28 新增护栏）
+    # 扫描范围（评审第四轮 G1 定死的唯一口径）：**全仓 md + bridge/api.py**，靠**语境词**挡误报、
+    # 靠**段级排除表**挡历史留档。**"四处"是必检项，不是扫描边界** —— 若把它当边界，
+    # 排除表就空转，而检查器再也看不见第五处（那正是本 thread 的病因）。
+    live = {
+        "docs/ARCHITECTURE.md": "已有 §11.5 说 **bridge 自有端点恰好三个**：`/api/state`、`/api/judge`、`/api/daily`\n",
+        "bridge/api.py": '  · 自有端点恰好三个：`/api/state`、`/api/judge`、`/api/daily`\n',
+    }
+    bad_name = dict(live)
+    bad_name["bridge/api.py"] = live["bridge/api.py"].replace("/api/judge", "/api/ghost")
+    errs = _endpoint_set_problems(bad_name)
+    print(f"[selftest D] 端点名单被改一处 → C2b 命中 {len(errs)} 条（期望 >0）")
+    if not errs:
+        failures.append("D：端点名单改了却没人报红")
+    bad_count = dict(live)
+    bad_count["docs/ARCHITECTURE.md"] = live["docs/ARCHITECTURE.md"].replace("恰好三个", "恰好五个")
+    errs = _endpoint_set_problems(bad_count)
+    print(f"[selftest E] 计数短语与名单不符 → C2b 命中 {len(errs)} 条（期望 >0）")
+    if not errs:
+        failures.append("E：计数短语与名单不符却没报红")
+
     with tempfile.TemporaryDirectory() as td:
         # fixture A：引用了树里没有的路径 → C1 必须红
         repo = _fixture(Path(td), docs_extra="见 `core/ghost.py` 与 `config/missing.toml`。\n")
@@ -409,7 +513,7 @@ def selftest() -> int:
         for f in failures:
             print("   -", f)
         return 1
-    print("\n✅ 自测通过：三类负例都能被逮住（A→C1、B→C2、C→C3）")
+    print("\n✅ 自测通过：五类负例都能被逮住（A→C1、B→C2、C→C3、D/E→C2b 端点名单与计数短语）")
     return 0
 
 
@@ -427,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
     docs = repo / "docs"
     fork = Path("/home/myuser/workspaces/DeepSeek/math-practice-survey/clones/kaoyan-math-tutor")
 
-    problems = check_c1(repo, docs) + check_c2(repo, docs) + check_c3(repo, docs, fork)
+    problems = check_c1(repo, docs) + check_c2(repo, docs) + check_c2b(repo) + check_c3(repo, docs, fork)
     if problems:
         print(f"❌ refcheck 发现 {len(problems)} 个问题：")
         for p in problems:
