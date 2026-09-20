@@ -171,7 +171,7 @@ window.__ModuleLoader__.load({
 		* @param ctx - DSH 客户端上下文（cordis）。
 		*/
 		function apply(ctx) {
-			const locale = typeof ctx.get === "function" ? ctx.get("locale") : ctx.locale;
+			const locale = ctx.get?.("locale");
 			if (locale !== void 0) {
 				const registerDicts = () => locale.register(NS, DICTS);
 				if (typeof ctx.effect === "function") ctx.effect(registerDicts, `${NS}: dictionaries`);

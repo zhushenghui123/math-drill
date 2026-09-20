@@ -149,11 +149,15 @@ export function apply(ctx: {
   slots: { inject: (name: string, factory: () => unknown) => void; register: (options: Record<string, unknown>, component: unknown) => unknown }
   /** 可选服务：用 `ctx.get('locale')` 取，不声明 inject（见 `inject` 的注释）。 */
   get?: (name: string) => unknown
-  locale?: { register: (namespace: string, dictionaries: Record<string, unknown>) => unknown }
   effect?: (factory: () => unknown, label?: string) => unknown
 }): void {
-  // locale 是**可选**服务：缺失时面板用回退字典（同一份 DICTS），而不是把插件挂起
-  const locale = (typeof ctx.get === 'function' ? ctx.get('locale') : ctx.locale) as
+  // locale 是**可选**服务：缺失时面板用回退字典（同一份 DICTS），而不是把插件挂起。
+  // 为什么只走 `ctx.get`、不写 `ctx.locale` 兜底（2026-09-20 第二轮定点复查清单 3）：
+  // ① `ctx.get` 恒为函数（context.d.ts:28-29）⇒ 那个兜底分支**永不执行**，是死码；
+  // ② 若它真被执行，正是 Guard 会拒的写法 —— 未声明 inject 就按服务名访问会报
+  //    `service "x" is not declared`（官方 Skill "Common failure checks" 首行）。
+  // ⇒ 删掉兜底，只留 `ctx.get`。
+  const locale = ctx.get?.('locale') as
     | { register: (namespace: string, dictionaries: Record<string, unknown>) => unknown }
     | undefined
   if (locale !== undefined) {

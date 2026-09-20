@@ -1,6 +1,7 @@
-# `@math-drill/dsh-plugin` —— 桥接插件（宿主半边）
+# `@math-drill/dsh-plugin` —— 考研数学 × DSH 桥接插件（宿主半边 + 客户端半边）
 
-把考研数学练题系统的**只读**数据接到 DSH：两个 agent 工具，**不写任何东西**。
+把考研数学练题系统接到 DSH：**宿主半边**给 agent 两个**只读**工具 + 一条只读状态路由；
+**客户端半边**在对话输入区上方放一条状态条。**不写任何东西**（判定链路无 LLM，agent 在讲解侧）。
 
 ## 它做什么
 
@@ -78,6 +79,21 @@ node --test /home/myuser/workspaces/DeepSeek/math-drill/dsh/math-drill-plugin/te
 | 文案 | `math-drill` locale 命名空间（zh/en **键对齐**，有测试）；`locale` 是**可选**服务（`ctx.get('locale')`），缺失时回退同一份字典而非静默不激活 |
 | 样式 | 只用 `--dsw-alias-*` 语义 token（`--dsw-alias-border-l2` 0.5px 发丝线 + `--dsw-alias-brand-primary`）；**不**用 `--dsw-elevation-*`（本机 0.1.1-rc.1 全树零命中） |
 | 产物 | `lib/client.js` = `window.__ModuleLoader__.load({id, factory})` 包装，`require` 只落平台表（`build/web-platform.ts`） |
+
+### 两条**已知取舍**（别按"一致性"顺手改掉）
+
+1. ⚠️ **`dsh.client.inject` 与运行期 `inject` 故意不一致，不要去"对齐"它**：
+   `package.json` 的 `dsh.client.inject` 是**包名边**（信息性，服务预检显示与 HMR diff 用；
+   定义见 `packages/client/modules/src/client/manifest.ts:58`），我们填
+   `["@deepseek-ai/dsh-client-ui-slots","@deepseek-ai/dsh-client-locale"]`；
+   而 `src/client/index.ts` 的运行期 `inject` 只有 `['slots']`（locale 是**可选**服务，走 `ctx.get`）。
+   **删掉那个 locale 包边会抹掉"我们确实碰过 locale 包"的唯一记录** —— 下次想找谁在用 locale 时就没有线索了。
+2. ⚠️ **locale 晚到的失败模式（已知、未修）**：`ctx.get('locale')` 是**一次性读取、不重试**。
+   若某个宿主先激活我们的插件、后提供 locale 服务，则本次进程内**永久走中文回退字典**
+   （面板照常出现，只是不跟随宿主语言）。竞态依据：官方 Skill 的 "Access Services" 段（声明 `inject` 才会等它重新激活）。
+   官方第三条路 `ctx.inject(deps, cb)`（≡ 挂一个带 `inject` 的子插件）能等到 locale 再回调，
+   但**把槽位注册挪进回调会退回"面板可能永不出现"**，比现在更糟 ⇒ **当前实现是局部最优**，
+   登记在此、不在 N=1（中文用户）场景下引复杂度。**若将来要支持英文宿主，这是第一个要改的地方。**
 
 ```bash
 node tools/build-client.mjs      # 构建产物；⚠️ 改了 src/client/** 必须重跑（产物入仓、不会自己更新）

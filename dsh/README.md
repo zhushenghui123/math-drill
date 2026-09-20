@@ -91,6 +91,10 @@ chmod 600 ~/.dsh/math-drill/agent-credential
   （本轮吃过一次：改了源码没重建，测试立刻红）。
 - **明确不做的**（2026-09-20 评审定案）：`dsh.client.immediately: true`（那是基础设施行专用）；
   换槽位到 `conversation.composer.dock`（它带 `!hero` 守卫，会在"刚开新会话"时消失）。
+- ⚠️ **两条"别按一致性顺手改"的取舍**（详见 `math-drill-plugin/README.md` 的"已知取舍"节）：
+  ① `package.json` 的 `dsh.client.inject`（**包名边**，信息性）与 `src/client/index.ts` 的**运行期** `inject`
+  **故意不一致** —— 前者留着 `@deepseek-ai/dsh-client-locale` 是"我们碰过 locale 包"的唯一记录，删了就没线索；
+  ② `ctx.get('locale')` 是**一次性读取、不重试**：locale 晚到的宿主会**永久走中文回退**（面板照常出现，只是不跟随宿主语言）。
 - **0 号步 d**（ADR-015 分期）：先在这台笔记本上把 DSH 用起来，看 agent 到底帮不帮得上学习；
   插件只提供数据与工具，判断留给使用体验。
 
