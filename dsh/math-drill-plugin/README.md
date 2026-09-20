@@ -8,7 +8,7 @@
 | 工具 | 上游 | 给 agent 的 |
 |---|---|---|
 | `math_drill_progress` | `GET /api/state` | 轨道、目标考试与剩余天数、今日完成度、打卡、卡片/笔记数 |
-| `math_drill_today` | `GET /api/daily` | 今天的题干、考点 `kid`、题型、难度、选项 |
+| `math_drill_today` | `GET /api/daily` | **只回数据**：题数、考点分布、难度分布、题型分布、题号（**不回题面/答案** —— 题在看板看） |
 
 **两条红线写进了代码，不是写在注释里**：
 
@@ -148,6 +148,10 @@ handler 收 `CommandInvocation{ commandId, agent, rawInput, attachments, signal 
 
 ## 还没做
 
+- **写回控制台**（决策人 2026-09-20 定的方向：agent 交流产生的数据要能写回研数）——**需要服务端新增读写面**：
+  attempts 按 ADR-007 由 judge 独占写入，且当前**没有 attempts 读端点**（复盘/错因数据读不到）⇒ 这是 bridge/core 侧的改动，
+  不在插件内；插件侧只需在拿到端点后加工具。
+- **实时互通**：现在是"挂载时拉一次 + 手动刷新"；若要"实时"，得在 bridge 侧加推送（SSE/轮询契约），同时定清"谁在写、谁的版本赢"。
 - **C3 设置页**（`settings.section`）：把 `baseUrl` / 凭据路径搬进设置界面。
 - （原 C4 已落地，见上。）
 - 任何后续项都**要求先查契约再动手**（官方 Skill 原话：不要从服务名 / 槽位名 / 示例反推 API）。

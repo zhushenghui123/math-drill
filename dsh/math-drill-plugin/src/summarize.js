@@ -42,23 +42,6 @@ export function daysUntil(dateText, now = new Date()) {
 const countOf = (value) => (Array.isArray(value) ? value.length : 0)
 
 /**
- * 把题面里的**裸 LaTeX 环境**包成 markdown 数学定界符，让客户端渲染成真公式。
- *
- * 为什么需要：题库里的题面是数学式与中文混排，`\begin{vmatrix}…\end{vmatrix}` 是**裸的**
- * （没有 `$` / `$$`），markdown 渲染器不会把它当数学 ⇒ 用户看到一串反斜杠。
- * 包成 `$$…$$` 后由官方渲染件（`ui-primitives` 的 `MarkdownText`，内置 KaTeX）画成公式。
- *
- * @param {unknown} text - 题面原文。
- * @returns {string} 包裹后的文本。
- */
-export function toMarkdownMath(text) {
-  return String(text ?? '').replace(
-    /\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/g,
-    (match) => `$$${match}$$`,
-  )
-}
-
-/**
  * `/api/state` 的 blob → 短文本。
  *
  * @param {Record<string, any>} blob - `{ server_version, data }`。
@@ -141,13 +124,28 @@ export function summarizeBrief(blob, now = new Date()) {
 export function summarizeDaily(payload) {
   const questions = Array.isArray(payload?.questions) ? payload.questions : []
   if (questions.length === 0) return '今天服务端没有出题（题库为空，或还没灌库）。'
-  const lines = [`今日题单（server_version=${payload?.server_version ?? 0}，共 ${questions.length} 题）`]
-  for (const [index, raw] of questions.entries()) {
+  // ⚠️ 方向校正（2026-09-20 决策人）：**DSH 不是题目的第二展示面** —— 题目/做题/解析都在研数控制台。
+  // 所以这里**只回数据**（数量 / 考点 / 难度分布 / 题号 / 题型），**不回题面**：
+  // agent 拿这些数据就够用来"陪你复盘、点出薄弱考点"，要看题请回控制台。
+  const kids = new Map()
+  const difficulties = new Map()
+  const types = new Map()
+  for (const raw of questions) {
     const q = stripQuestionAnswers(raw)
-    const options = Array.isArray(q.options) ? `｜选项 ${JSON.stringify(q.options)}` : ''
-    const stem = toMarkdownMath(String(q.stem ?? '').replace(/\s+/g, ' ').trim())
-    lines.push(`${index + 1}. [${q.kid ?? '?'} / ${q.id}] 难度 ${q.difficulty ?? '?'}｜${stem}${options}`)
+    const kid = String(q.kid ?? '（未标注考点）')
+    kids.set(kid, (kids.get(kid) ?? 0) + 1)
+    const difficulty = String(q.difficulty ?? '?')
+    difficulties.set(difficulty, (difficulties.get(difficulty) ?? 0) + 1)
+    const type = String(q.type ?? '?')
+    types.set(type, (types.get(type) ?? 0) + 1)
   }
-  lines.push('（**答案与解析不在本输出内**：agent 只陪讲解与思路，判分由服务端 judge 负责）')
-  return lines.join('\n')
+  const fmt = (map) => [...map.entries()].map(([key, count]) => `${key}×${count}`).join('、')
+  return [
+    `今日题单（server_version=${payload?.server_version ?? 0}）：**${questions.length} 题**`,
+    `· 考点：${fmt(kids)}`,
+    `· 难度：${fmt(difficulties)}`,
+    `· 题型：${fmt(types)}`,
+    `· 题号：${questions.map((q) => String(q?.id ?? '?')).join('、')}`,
+    '（**题面与答案都不在本输出内**：看题、做题、判分都在研数控制台；这里只提供"该练什么"的数据。）',
+  ].join('\n')
 }

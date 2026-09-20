@@ -20,7 +20,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { createMathDrillClient, MathDrillError } from '../src/math-drill-api.js'
 import { CredentialError, readCredential } from '../src/credential.js'
-import { daysUntil, stripQuestionAnswers, summarizeBrief, summarizeDaily, summarizeProgress, toMarkdownMath } from '../src/summarize.js'
+import { daysUntil, stripQuestionAnswers, summarizeBrief, summarizeDaily, summarizeProgress } from '../src/summarize.js'
 
 const CREDENTIAL = 'agent-credential-value-for-tests-0123456789'
 /** 专门用来触发"慢上游"的第二个凭据（假上游据此延迟响应）。 */
@@ -215,10 +215,14 @@ describe('红线：答案不进模型上下文（ADR-013 定位 / ADR-015 决策
     assert.equal(stripped.stem, QUESTION_WITH_ANSWER.stem)
   })
 
-  it('summarizeDaily 的输出里**既没有答案也没有解析**，但题干在', () => {
+  it('summarizeDaily 只回**数据**（数量/考点/难度/题型/题号），连题面都不回', () => {
     const text = summarizeDaily({ server_version: 7, daily: {}, questions: [QUESTION_WITH_ANSWER] })
-    assert.match(text, /三阶行列式/)
-    assert.match(text, /c1n1/)
+    assert.match(text, /1 题/)
+    assert.match(text, /考点：c1n1×1/)
+    assert.match(text, /难度：2×1/)
+    assert.match(text, /题型：blank×1/)
+    assert.match(text, /linalg\.det\.3x3\.a/, '题号要给出（agent 据此指路）')
+    assert.equal(text.includes('三阶行列式'), false, '题面不进 DSH（决策人 2026-09-20 校正方向）')
     assert.equal(text.includes(QUESTION_WITH_ANSWER.answer), false, '答案不得进上下文')
     assert.equal(text.includes('按第一行展开'), false, '解析不得进上下文')
   })
@@ -254,23 +258,6 @@ describe('红线：答案不进模型上下文（ADR-013 定位 / ADR-015 决策
   })
 })
 
-describe('题面公式：裸 LaTeX 环境包成 $$…$$（否则客户端只显示反斜杠）', () => {
-  it('matrix 环境被包起来，普通文字不受影响', () => {
-    const wrapped = toMarkdownMath('计算 \\begin{vmatrix} 1 & 2 \\\\ 3 & 4 \\end{vmatrix} 的值')
-    assert.match(wrapped, /\$\$\\begin\{vmatrix\}/)
-    assert.match(wrapped, /\\end\{vmatrix\}\$\$/)
-    assert.match(wrapped, /^计算 /)
-  })
-
-  it('summary 里的题面已经带定界符（端到端）', () => {
-    const text = summarizeDaily({ server_version: 1, questions: [{
-      id: 'q', kid: 'k', type: 'blank', difficulty: 1,
-      stem: '求 \\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix} 的迹', options: null,
-    }] })
-    assert.match(text, /\$\$\\begin\{pmatrix\}/)
-    assert.equal(text.includes('answer'), false)
-  })
-})
 
 describe('一行简报（状态条专用）', () => {
   it('是单行、含今日进度与考试倒计时，不含换行', () => {

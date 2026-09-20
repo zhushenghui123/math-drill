@@ -179,7 +179,8 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     assert.equal(payload.schemaVersion, STATE_SCHEMA_VERSION, '响应必须带契约版本（评审 §B4 正解 (a)）')
     assert.equal(typeof payload.brief, 'string', '响应要带一行简报（状态条用）')
     assert.equal(payload.brief.includes('\n'), false, '简报必须是一行')
-    assert.match(payload.text, /三阶行列式/)
+    assert.match(payload.text, /考点：c1n1×1/)
+    assert.equal(payload.text.includes('三阶行列式'), false, '题面不进 DSH')
     assert.equal(payload.text.includes(QUESTION.answer), false, '答案不得进浏览器')
     assert.equal(payload.text.includes(CREDENTIAL), false, '凭据不得进浏览器')
 
@@ -224,7 +225,8 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     assert.equal(progress.text.includes(CREDENTIAL), false, '凭据绝不能进输出')
 
     const today = await registeredVia(ctx.toolCalls)[1].execute({}, {})
-    assert.match(today.text, /三阶行列式/)
+    assert.match(today.text, /考点：c1n1×1/)
+    assert.equal(today.text.includes('三阶行列式'), false, '题面不进 DSH')
     assert.equal(today.text.includes(QUESTION.answer), false, '答案不得进上下文（红线）')
     assert.equal(today.text.includes('按第一行展开'), false, '解析不得进上下文（红线）')
   })
@@ -259,7 +261,7 @@ describe('/math 斜杠命令（C4）', () => {
 
     const today = await command.handler({ rawInput: ' today ' })
     assert.equal(today.kind, 'success')
-    assert.match(today.text, /三阶行列式/)
+    assert.match(today.text, /考点：c1n1×1/)
     assert.equal(today.text.includes(QUESTION.answer), false)
     assert.equal(today.text.includes('按第一行展开'), false)
 

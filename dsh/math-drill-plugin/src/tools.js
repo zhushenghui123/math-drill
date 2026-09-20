@@ -52,8 +52,9 @@ export function createMathDrillTools({ client }) {
   const today = defineTool({
     name: 'math_drill_today',
     description:
-      '读取考研数学今天这一批题目（题干、考点 kid、题型、难度、选项）。**答案与解析不会返回**：'
-      + '本工具用于陪用户讲解与梳理思路，判分由服务端负责。',
+      '读取考研数学**今天该练什么**的清单数据：题数、考点分布、难度分布、题型分布、题号。'
+      + '**不回题面、不回答案** —— 看题/做题/判分都在研数控制台，本工具只提供"该练什么"的数据，'
+      + '用于陪用户复盘、点出薄弱考点。',
     parameters: {},
     output: TEXT_OUTPUT,
     async execute() {
