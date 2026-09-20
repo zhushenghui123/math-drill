@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 
 import { apply, Config, inject, name } from '../src/index.js'
+import { STATE_PATH, STATE_SCHEMA_VERSION } from '../src/shared/contract.js'
 // 真实契约的锚：桩（stub）不自己发明方法名，而是**照着真服务的原型**建。
 // 起因（2026-09-19 实拍）：我把 `ctx.webServer.register` 写成 `registerRoute`，
 // 而桩用了同一个错名字 ⇒ 测试全绿、**真实 profile 启动失败**。
@@ -146,7 +147,7 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'missing') })
     assert.deepEqual(registeredVia(ctx.toolCalls).map((tool) => tool.name), ['math_drill_progress', 'math_drill_today'])
     assert.equal(ctx.effects.length, 3, '每个工具 + 路由都要有自己的 effect（卸载即注销）')
-    assert.deepEqual(registeredVia(ctx.serverCalls).map((route) => [route.kind, route.path]), [['exact', '/math-drill/summary']])
+    assert.deepEqual(registeredVia(ctx.serverCalls).map((route) => [route.kind, route.path]), [['exact', STATE_PATH]])
     for (const tool of registeredVia(ctx.toolCalls)) {
       assert.ok(tool.description.length > 20, '工具描述要够长，模型才知道何时用')
       assert.equal(typeof tool.execute, 'function')
@@ -167,6 +168,7 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     assert.equal(okResponse.status, 200)
     const payload = JSON.parse(okResponse.body)
     assert.equal(payload.ok, true)
+    assert.equal(payload.schemaVersion, STATE_SCHEMA_VERSION, '响应必须带契约版本（评审 §B4 正解 (a)）')
     assert.match(payload.text, /三阶行列式/)
     assert.equal(payload.text.includes(QUESTION.answer), false, '答案不得进浏览器')
     assert.equal(payload.text.includes(CREDENTIAL), false, '凭据不得进浏览器')
@@ -185,6 +187,7 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     assert.equal(response.status, 200)
     const payload = JSON.parse(response.body)
     assert.equal(payload.ok, false)
+    assert.equal(payload.schemaVersion, STATE_SCHEMA_VERSION)
     assert.match(payload.error, /凭据/)
   })
 

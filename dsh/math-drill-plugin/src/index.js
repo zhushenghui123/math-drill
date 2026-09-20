@@ -15,16 +15,23 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import z from '@deepseek-ai/schemastery'
 import { createMathDrillClient, MathDrillError } from './math-drill-api.js'
 import { CredentialError, DEFAULT_CREDENTIAL_RELATIVE_PATH, readCredential } from './credential.js'
+import { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
 import { summarizeDaily, summarizeProgress } from './summarize.js'
 import { createMathDrillTools, MATH_DRILL_TOOL_NAMES } from './tools.js'
 
 export { stripQuestionAnswers, summarizeDaily, summarizeProgress } from './summarize.js'
+export { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
 
 /** cordis 诊断用的插件名（与 cordis.patch.yml 的 id 对应）。 */
 export const name = 'math-drill-dsh'
 
-/** 客户端半边（浏览器）读的只读摘要路由（凭据只留在宿主进程，不进浏览器）。 */
-export const SUMMARY_PATH = '/math-drill/summary'
+/**
+ * 客户端半边（浏览器）读的只读状态路由。
+ *
+ * @deprecated 真源已移到 `src/shared/contract.js` 的 `STATE_PATH`（两边相对 import，消掉两处真值）。
+ * 这里保留别名只为不破坏已有引用；**新代码请用 `STATE_PATH`**。
+ */
+export const SUMMARY_PATH = STATE_PATH
 
 /** 本插件需要的服务：工具面（agent 用）+ 宿主 web 服务器（客户端半边用）。其余数据面走 HTTP。 */
 export const inject = ['tools', 'webServer']
@@ -101,7 +108,7 @@ export async function apply(ctx, config) {
   //   真实 profile **启动直接失败** —— 教训见 tests/wiring.test.mjs 的注释。
   const route = {
     kind: 'exact',
-    path: SUMMARY_PATH,
+    path: STATE_PATH,
     handler: async (req, res) => {
       if (req.method !== 'GET') {
         res.writeHead(405, { 'content-type': 'application/json; charset=utf-8' })
@@ -115,6 +122,7 @@ export async function apply(ctx, config) {
         const [state, daily] = await Promise.all([mathDrill.state(), mathDrill.daily()])
         res.writeHead(200)
         res.end(JSON.stringify({
+          schemaVersion: STATE_SCHEMA_VERSION,
           ok: true,
           text: `${summarizeProgress(state)}\n\n${summarizeDaily(daily)}`,
           fetchedAt: Date.now(),
@@ -122,11 +130,15 @@ export async function apply(ctx, config) {
       } catch (error) {
         // 失败也回 200 + ok:false：面板要把"怎么修"显示出来，而不是只显示一个红叉
         res.writeHead(200)
-        res.end(JSON.stringify({ ok: false, error: explain(error, resolved).message }))
+        res.end(JSON.stringify({
+          schemaVersion: STATE_SCHEMA_VERSION,
+          ok: false,
+          error: explain(error, resolved).message,
+        }))
       }
     },
   }
-  ctx.effect(() => ctx.webServer.register(route), `${name}: ${SUMMARY_PATH}`)
+  ctx.effect(() => ctx.webServer.register(route), `${name}: ${STATE_PATH}`)
 
   ctx.logger?.info?.(`${name}: 已注册 ${MATH_DRILL_TOOL_NAMES.join(' / ')}（只读；baseUrl=${resolved.baseUrl}）`)
 }
