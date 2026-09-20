@@ -80,6 +80,16 @@ node --test /home/myuser/workspaces/DeepSeek/math-drill/dsh/math-drill-plugin/te
 | 样式 | 只用 `--dsw-alias-*` 语义 token（`--dsw-alias-border-l2` 0.5px 发丝线 + `--dsw-alias-brand-primary`）；**不**用 `--dsw-elevation-*`（本机 0.1.1-rc.1 全树零命中） |
 | 产物 | `lib/client.js` = `window.__ModuleLoader__.load({id, factory})` 包装，`require` 只落平台表（`build/web-platform.ts`） |
 | 工具卡片 | keyed `tool.call.toolview`（key = **wire 工具名**）—— 见下 |
+| 渲染 | 正文与状态条都走官方 **`MarkdownText`**（`@deepseek-ai/dsh-client-ui-primitives`，**平台表内**，内置 KaTeX）⇒ 题面公式渲染成真公式，不再是裸 LaTeX |
+
+### 公式与排版（2026-09-20 夜，回应"公式没渲染 / 不好看"）
+
+1. **渲染件用官方的**：`ui-primitives` 的 `MarkdownText({ text })` —— 该包**本来就在 `build/web-platform.ts` 的平台表里**，
+   其 CSS 也随宿主加载 ⇒ **零新依赖、零新机制**；markdown 排版 + KaTeX 公式，卡片与状态条共用。
+2. **题面里的裸 LaTeX 包成 `$$…$$`**：题库题面是中文与数学式混排，`\begin{vmatrix}…\end{vmatrix}`
+   **没有定界符** ⇒ markdown 不当数学渲染，用户看到一串反斜杠。宿主侧 `summarize.js` 的 `toMarkdownMath()`
+   把数学环境包起来（有单测 + 端到端测试）。
+3. **卡片正文不按行截断**：题面含 LaTeX，按行截会截出半个矩阵。
 
 ### 工具卡片（C2，2026-09-20 落地）
 

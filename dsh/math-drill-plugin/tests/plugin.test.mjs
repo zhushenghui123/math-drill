@@ -20,7 +20,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { createMathDrillClient, MathDrillError } from '../src/math-drill-api.js'
 import { CredentialError, readCredential } from '../src/credential.js'
-import { daysUntil, stripQuestionAnswers, summarizeDaily, summarizeProgress } from '../src/summarize.js'
+import { daysUntil, stripQuestionAnswers, summarizeDaily, summarizeProgress, toMarkdownMath } from '../src/summarize.js'
 
 const CREDENTIAL = 'agent-credential-value-for-tests-0123456789'
 /** 专门用来触发"慢上游"的第二个凭据（假上游据此延迟响应）。 */
@@ -251,5 +251,23 @@ describe('红线：答案不进模型上下文（ADR-013 定位 / ADR-015 决策
     assert.equal(daysUntil('', new Date()), null)
     assert.equal(daysUntil('not-a-date', new Date()), null)
     assert.equal(daysUntil('2026-09-20', new Date('2026-09-19T23:59:00')), 1)
+  })
+})
+
+describe('题面公式：裸 LaTeX 环境包成 $$…$$（否则客户端只显示反斜杠）', () => {
+  it('matrix 环境被包起来，普通文字不受影响', () => {
+    const wrapped = toMarkdownMath('计算 \\begin{vmatrix} 1 & 2 \\\\ 3 & 4 \\end{vmatrix} 的值')
+    assert.match(wrapped, /\$\$\\begin\{vmatrix\}/)
+    assert.match(wrapped, /\\end\{vmatrix\}\$\$/)
+    assert.match(wrapped, /^计算 /)
+  })
+
+  it('summary 里的题面已经带定界符（端到端）', () => {
+    const text = summarizeDaily({ server_version: 1, questions: [{
+      id: 'q', kid: 'k', type: 'blank', difficulty: 1,
+      stem: '求 \\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix} 的迹', options: null,
+    }] })
+    assert.match(text, /\$\$\\begin\{pmatrix\}/)
+    assert.equal(text.includes('answer'), false)
   })
 })

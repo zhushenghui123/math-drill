@@ -16,6 +16,7 @@
  * @module @math-drill/dsh-plugin/client/card
  */
 
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createElement as h } from 'react'
 
 /** 卡片能拿到的 props 子集（只声明我们真正读的字段，避免猜契约）。 */
@@ -33,23 +34,20 @@ export interface MathDrillCardProps {
   t?: (key: string) => string
 }
 
-/** 卡片一次最多显示的行数（对话流要能扫得动；超出折叠成一行提示）。 */
-export const CARD_MAX_LINES = 12
-
 const BOX_STYLE = {
   border: '0.5px solid var(--dsw-alias-border-l2)',
   borderRadius: '8px',
-  padding: '6px 10px',
-  margin: '4px 0',
+  padding: '8px 12px',
+  margin: '6px 0',
   fontSize: '12px',
-  lineHeight: '1.6',
 } as const
 
 const HEAD_STYLE = {
-  display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', opacity: 0.9,
+  display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px',
+  fontWeight: 600, letterSpacing: '0.01em',
 } as const
 
-const BODY_STYLE = { whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 } as const
+const MARK_STYLE = { opacity: 0.85 } as const
 
 /** 卡片状态：运行中 / 成功 / 出错（官方 `ToolRowState` 的口径，这里只取我们要的三档）。 */
 export function cardState(block: MathDrillCardProps['block']): 'running' | 'ok' | 'error' {
@@ -75,29 +73,23 @@ export function MathDrillCard(props: MathDrillCardProps) {
   const translate = (key: string, fallback: string): string =>
     typeof props.t === 'function' ? props.t(key) : fallback
   const state = cardState(props.block)
-  const lines = cardLines(props.block)
-  const shown = lines.slice(0, CARD_MAX_LINES)
-  const hidden = lines.length - shown.length
+  // 正文**不截断**：题面里有 LaTeX，按行截会截断公式（渲染出半个矩阵）
+  const body = cardLines(props.block).join('\n')
 
   const title = props.toolName === 'math_drill_today'
     ? translate('card.today', '考研数学 · 今日题单')
     : translate('card.progress', '考研数学 · 进度')
   const mark = state === 'running' ? '⏳' : state === 'error' ? '⚠️' : '✓'
-  const body = shown.length > 0
-    ? shown.join('\n')
-    : state === 'running'
-      ? translate('card.running', '读取中…')
-      : props.block?.error?.code ?? translate('card.empty', '（没有内容）')
+  const fallback = state === 'running'
+    ? translate('card.running', '读取中…')
+    : props.block?.error?.code ?? translate('card.empty', '（没有内容）')
 
   return h('div', { style: BOX_STYLE, 'data-math-drill': 'card' },
     h('div', { style: HEAD_STYLE },
-      h('span', null, mark),
+      h('span', { style: MARK_STYLE }, mark),
       h('span', null, title),
     ),
-    h('pre', { style: BODY_STYLE }, body),
-    hidden > 0
-      ? h('div', { style: { opacity: 0.7 } },
-          translate('card.truncated', `…还有 ${hidden} 行（展开详情可看全）`))
-      : null,
+    // markdown + KaTeX：题面里的 \begin{vmatrix}… 由官方渲染件画出来，不再是裸 LaTeX
+    body === '' ? h('div', { style: { opacity: 0.75 } }, fallback) : h(MarkdownText, { text: body }),
   )
 }

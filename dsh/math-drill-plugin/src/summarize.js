@@ -42,6 +42,23 @@ export function daysUntil(dateText, now = new Date()) {
 const countOf = (value) => (Array.isArray(value) ? value.length : 0)
 
 /**
+ * 把题面里的**裸 LaTeX 环境**包成 markdown 数学定界符，让客户端渲染成真公式。
+ *
+ * 为什么需要：题库里的题面是数学式与中文混排，`\begin{vmatrix}…\end{vmatrix}` 是**裸的**
+ * （没有 `$` / `$$`），markdown 渲染器不会把它当数学 ⇒ 用户看到一串反斜杠。
+ * 包成 `$$…$$` 后由官方渲染件（`ui-primitives` 的 `MarkdownText`，内置 KaTeX）画成公式。
+ *
+ * @param {unknown} text - 题面原文。
+ * @returns {string} 包裹后的文本。
+ */
+export function toMarkdownMath(text) {
+  return String(text ?? '').replace(
+    /\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/g,
+    (match) => `$$${match}$$`,
+  )
+}
+
+/**
  * `/api/state` 的 blob → 短文本。
  *
  * @param {Record<string, any>} blob - `{ server_version, data }`。
@@ -92,7 +109,7 @@ export function summarizeDaily(payload) {
   for (const [index, raw] of questions.entries()) {
     const q = stripQuestionAnswers(raw)
     const options = Array.isArray(q.options) ? `｜选项 ${JSON.stringify(q.options)}` : ''
-    const stem = String(q.stem ?? '').replace(/\s+/g, ' ').trim()
+    const stem = toMarkdownMath(String(q.stem ?? '').replace(/\s+/g, ' ').trim())
     lines.push(`${index + 1}. [${q.kid ?? '?'} / ${q.id}] 难度 ${q.difficulty ?? '?'}｜${stem}${options}`)
   }
   lines.push('（**答案与解析不在本输出内**：agent 只陪讲解与思路，判分由服务端 judge 负责）')

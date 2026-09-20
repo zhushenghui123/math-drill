@@ -4,6 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 		let react = require("react");
 		//#region src/shared/contract.js
 		/**
@@ -34,26 +35,41 @@ window.__ModuleLoader__.load({
 			if (candidate.schemaVersion !== 1) return false;
 			return typeof candidate.ok === "boolean";
 		}
+		//#endregion
+		//#region src/client/MathDrillCard.ts
+		/**
+		* `math_drill_*` 工具的对话内卡片（keyed `tool.call.toolview`）。
+		*
+		* 为什么必须自己渲染输出：官方源码写明 **keyed 命中会"替换"通用行**
+		* （`packages/client/ui-tool/src/client/tool/models/tool-call-model.ts:29-36`：
+		* "ui-cordis registers a keyed `tool.call.toolview` entry for it, and a keyed hit REPLACES the generic row"）
+		* ⇒ 注册了 key 却不画内容，用户就看不到工具结果了。
+		*
+		* 数据面（本机 0.1.1-rc.1 的契约，逐字核过）：
+		* `ToolCallOwnerProps = { callId, toolName, block, cwd?, home?, openFile, inspect? }`
+		* （`packages/client/ui-tool/src/client/contract/slots.ts:29-44`）；
+		* `block` 是"冻结的运行中调用**或**已落定结果"：`'kind' in block` 判落定，
+		* 落定节点带 `content: readonly ContentBlock[]` / `isError` / `error`
+		* （`packages/client/runtime/lib/types/client/sessions/conversation.d.ts:165-185`）。
+		*
+		* @module @math-drill/dsh-plugin/client/card
+		*/
 		const BOX_STYLE$1 = {
 			border: "0.5px solid var(--dsw-alias-border-l2)",
 			borderRadius: "8px",
-			padding: "6px 10px",
-			margin: "4px 0",
-			fontSize: "12px",
-			lineHeight: "1.6"
+			padding: "8px 12px",
+			margin: "6px 0",
+			fontSize: "12px"
 		};
 		const HEAD_STYLE = {
 			display: "flex",
 			alignItems: "center",
 			gap: "6px",
-			marginBottom: "2px",
-			opacity: .9
+			marginBottom: "4px",
+			fontWeight: 600,
+			letterSpacing: "0.01em"
 		};
-		const BODY_STYLE = {
-			whiteSpace: "pre-wrap",
-			fontFamily: "inherit",
-			margin: 0
-		};
+		const MARK_STYLE = { opacity: .85 };
 		/** 卡片状态：运行中 / 成功 / 出错（官方 `ToolRowState` 的口径，这里只取我们要的三档）。 */
 		function cardState(block) {
 			if (block === void 0 || block.kind === void 0) return "running";
@@ -72,16 +88,14 @@ window.__ModuleLoader__.load({
 		function MathDrillCard(props) {
 			const translate = (key, fallback) => typeof props.t === "function" ? props.t(key) : fallback;
 			const state = cardState(props.block);
-			const lines = cardLines(props.block);
-			const shown = lines.slice(0, 12);
-			const hidden = lines.length - shown.length;
+			const body = cardLines(props.block).join("\n");
 			const title = props.toolName === "math_drill_today" ? translate("card.today", "考研数学 · 今日题单") : translate("card.progress", "考研数学 · 进度");
 			const mark = state === "running" ? "⏳" : state === "error" ? "⚠️" : "✓";
-			const body = shown.length > 0 ? shown.join("\n") : state === "running" ? translate("card.running", "读取中…") : props.block?.error?.code ?? translate("card.empty", "（没有内容）");
+			const fallback = state === "running" ? translate("card.running", "读取中…") : props.block?.error?.code ?? translate("card.empty", "（没有内容）");
 			return (0, react.createElement)("div", {
 				style: BOX_STYLE$1,
 				"data-math-drill": "card"
-			}, (0, react.createElement)("div", { style: HEAD_STYLE }, (0, react.createElement)("span", null, mark), (0, react.createElement)("span", null, title)), (0, react.createElement)("pre", { style: BODY_STYLE }, body), hidden > 0 ? (0, react.createElement)("div", { style: { opacity: .7 } }, translate("card.truncated", `…还有 ${hidden} 行（展开详情可看全）`)) : null);
+			}, (0, react.createElement)("div", { style: HEAD_STYLE }, (0, react.createElement)("span", { style: MARK_STYLE }, mark), (0, react.createElement)("span", null, title)), body === "" ? (0, react.createElement)("div", { style: { opacity: .75 } }, fallback) : (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, { text: body }));
 		}
 		//#endregion
 		//#region src/client/index.ts
@@ -148,12 +162,13 @@ window.__ModuleLoader__.load({
 		const SLOT_ID = "math-drill";
 		const BOX_STYLE = {
 			display: "flex",
-			alignItems: "center",
-			gap: "8px",
+			alignItems: "flex-start",
+			gap: "10px",
 			flexWrap: "wrap",
-			padding: "4px 10px",
-			margin: "0 0 4px",
-			borderRadius: "8px",
+			padding: "6px 12px",
+			margin: "0 0 6px",
+			borderRadius: "10px",
+			background: "var(--dsw-alias-bg-layer-1)",
 			border: "0.5px solid var(--dsw-alias-border-l2)",
 			fontSize: "12px",
 			lineHeight: "1.5",
@@ -161,11 +176,13 @@ window.__ModuleLoader__.load({
 		};
 		const LABEL_STYLE = {
 			fontWeight: 600,
-			whiteSpace: "nowrap"
+			whiteSpace: "nowrap",
+			paddingTop: "1px"
 		};
+		/** 正文用 markdown 渲染（和卡片同一件官方渲染件）⇒ 行距/列表/公式都有正确排版。 */
 		const TEXT_STYLE = {
-			whiteSpace: "pre-wrap",
-			flex: "1 1 240px"
+			flex: "1 1 260px",
+			minWidth: 0
 		};
 		const BUTTON_STYLE = {
 			border: "0.5px solid var(--dsw-alias-border-l2)",
@@ -218,7 +235,7 @@ window.__ModuleLoader__.load({
 			return (0, react.createElement)("div", {
 				style: BOX_STYLE,
 				"data-math-drill": "dock"
-			}, (0, react.createElement)("span", { style: LABEL_STYLE }, translate(props, "label")), (0, react.createElement)("span", { style: TEXT_STYLE }, body), (0, react.createElement)("button", {
+			}, (0, react.createElement)("span", { style: LABEL_STYLE }, translate(props, "label")), (0, react.createElement)("div", { style: TEXT_STYLE }, state.kind === "ready" ? (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, { text: body }) : (0, react.createElement)("span", null, body)), (0, react.createElement)("button", {
 				type: "button",
 				style: BUTTON_STYLE,
 				onClick: () => {

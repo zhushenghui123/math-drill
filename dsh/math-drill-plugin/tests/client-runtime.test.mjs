@@ -61,8 +61,13 @@ async function loadBundle(options = {}) {
   const [{ id, factory }] = registrations
 
   const react = fakeReact()
+  // 平台表内**允许**的第二个模块：官方的 markdown+KaTeX 渲染件（我们用它渲染题面公式）。
+  // 桩只做"可被 createElement 引用"的占位：组件不会被真的调用（假 createElement 不递归渲染），
+  // 断言因此落在元素树的 props.text 上。
+  const primitives = { MarkdownText: function MarkdownText() { return null } }
   const require = (specifier) => {
     if (specifier === 'react') return react
+    if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return primitives
     throw new Error(`产物 require 了平台表外的模块：${specifier}`)
   }
   const exports = factory(require)
