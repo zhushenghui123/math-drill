@@ -79,6 +79,17 @@ node --test /home/myuser/workspaces/DeepSeek/math-drill/dsh/math-drill-plugin/te
 | 文案 | `math-drill` locale 命名空间（zh/en **键对齐**，有测试）；`locale` 是**可选**服务（`ctx.get('locale')`），缺失时回退同一份字典而非静默不激活 |
 | 样式 | 只用 `--dsw-alias-*` 语义 token（`--dsw-alias-border-l2` 0.5px 发丝线 + `--dsw-alias-brand-primary`）；**不**用 `--dsw-elevation-*`（本机 0.1.1-rc.1 全树零命中） |
 | 产物 | `lib/client.js` = `window.__ModuleLoader__.load({id, factory})` 包装，`require` 只落平台表（`build/web-platform.ts`） |
+| 工具卡片 | keyed `tool.call.toolview`（key = **wire 工具名**）—— 见下 |
+
+### 工具卡片（C2，2026-09-20 落地）
+
+`math_drill_progress` / `math_drill_today` 的结果在对话里是**卡片**而不是裸文本：
+`src/client/MathDrillCard.ts` 自己把输出画出来（标题 + 状态记号 ⏳/✓/⚠️ + 输出正文，超过 12 行折叠）。
+
+⚠️ **为什么必须自己画**：官方源码写明 **keyed 命中会"替换"通用行**
+（`packages/client/ui-tool/src/client/tool/models/tool-call-model.ts:29-36`：`…a keyed hit REPLACES the generic row`）
+⇒ 注册了 key 却不渲染内容 = 用户看不到工具结果。数据面契约（`ToolCallOwnerProps` 的
+`block`，`'kind' in block` 判落定、落定带 `content`/`isError`）也逐字核过，出处写在 `MathDrillCard.ts` 文件头。
 
 ### 两条**已知取舍**（别按"一致性"顺手改掉）
 
@@ -110,7 +121,6 @@ node --test tests/               # 28 条：凭据纪律 / wire / 红线 / 接�
 
 ## 还没做
 
-- **C2 工具卡片**（`tool.call.toolview`，key = 工具名）：让 `math_drill_today` 的结果在对话里是卡片。
 - **C3 设置页**（`settings.section`）：把 `baseUrl` / 凭据路径搬进设置界面。
 - **C4 斜杠命令**（如 `/math`）：契约点在 `packages/extensions/ui-cordis/src/client/index.ts:168` 的 `slash.registerSource`。
 

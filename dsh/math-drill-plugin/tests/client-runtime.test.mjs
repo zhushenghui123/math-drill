@@ -96,12 +96,23 @@ describe('产物运行时（按 loader 契约真执行）', () => {
     assert.equal(calls.effects.length, 1, '字典注册必须包在 effect 里（可卸载）')
     assert.equal(calls.dictionaries.length, 1, '要注册一份文案字典')
     assert.equal(calls.dictionaries[0].namespace, 'math-drill')
-    assert.deepEqual(calls.injected, ['conversation.input.dock'])
-    assert.equal(calls.registered.length, 1)
+    // 一条状态条 + 两条工具卡片（keyed tool.call.toolview）
+    assert.deepEqual(calls.injected, [
+      'conversation.input.dock', 'tool.call.toolview', 'tool.call.toolview',
+    ])
+    assert.equal(calls.registered.length, 3)
     assert.deepEqual(calls.registered[0].options, {
       name: 'conversation.input.dock', id: 'math-drill', order: 20, locale: 'math-drill',
     }, '有 locale 服务时应声明命名空间')
-    assert.equal(typeof calls.registered[0].component, 'function')
+    assert.deepEqual(
+      calls.registered.slice(1).map((entry) => entry.options),
+      [
+        { name: 'tool.call.toolview', key: 'math_drill_progress', locale: 'math-drill' },
+        { name: 'tool.call.toolview', key: 'math_drill_today', locale: 'math-drill' },
+      ],
+      '两张卡片的 key 必须等于 wire 工具名',
+    )
+    for (const entry of calls.registered) assert.equal(typeof entry.component, 'function')
   })
 
   it('文案字典：zh/en 键集合必须相等，且键都带命名空间语义（有测试盯着）', async (t) => {
@@ -226,10 +237,48 @@ describe('locale 缺失时的行为（定点复查清单项：不能静默不激
     }
     const { calls } = await loadBundle({ withLocale: false })
     assert.equal(calls.dictionaries.length, 0, '没有服务就不该注册字典')
-    assert.equal(calls.registered.length, 1, '槽位注册必须照常发生（不能静默不激活）')
-    assert.equal('locale' in calls.registered[0].options, false, '没注册字典就不该声明命名空间')
+    assert.equal(calls.registered.length, 3, '槽位与卡片注册必须照常发生（不能静默不激活）')
+    for (const entry of calls.registered) {
+      assert.equal('locale' in entry.options, false, '没注册字典就不该声明命名空间')
+    }
     // 渲染仍要能出字（走回退字典，同一份 DICTS）
     const rendered = JSON.stringify(calls.registered[0].component({}))
     assert.match(rendered, /考研数学/)
+  })
+})
+
+describe('工具卡片（keyed tool.call.toolview）', () => {
+  it('落定结果把工具输出画出来（keyed 命中会替换通用行 ⇒ 必须自己画）', async (t) => {
+    if (!existsSync(artifact)) {
+      t.skip('lib/client.js 还没构建')
+      return
+    }
+    const { calls } = await loadBundle()
+    const card = calls.registered[1]           // math_drill_progress 的卡片
+    const rendered = JSON.stringify(card.component({
+      toolName: 'math_drill_progress',
+      block: { kind: 'tool-result', content: [{ type: 'text', text: '轨道：数学一\n复习 1/2' }], isError: false },
+    }))
+    assert.match(rendered, /考研数学 · 进度/)
+    assert.match(rendered, /复习 1\/2/)
+    assert.match(rendered, /✓/)
+  })
+
+  it('运行中与出错两档各有明确表现，不显示空白卡片', async (t) => {
+    if (!existsSync(artifact)) {
+      t.skip('lib/client.js 还没构建')
+      return
+    }
+    const { calls } = await loadBundle()
+    const card = calls.registered[2]           // math_drill_today 的卡片
+    const running = JSON.stringify(card.component({ toolName: 'math_drill_today', block: {} }))
+    assert.match(running, /⏳/)
+    assert.match(running, /读取中/)
+    const failed = JSON.stringify(card.component({
+      toolName: 'math_drill_today',
+      block: { kind: 'tool-result', content: [], isError: true, error: { code: 'unavailable' } },
+    }))
+    assert.match(failed, /⚠️/)
+    assert.match(failed, /unavailable/, '出错时至少把错误码显示出来')
   })
 })

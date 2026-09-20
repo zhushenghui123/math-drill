@@ -16,6 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { createElement as h, useCallback, useEffect, useState } from 'react'
 // 相对 import ⇒ 被 tsdown 内联进产物（不是 require），与宿主半边共用同一份契约（评审 Z1 的正解）
 import { isStateResponse, STATE_PATH } from '../shared/contract.js'
+import { MathDrillCard } from './MathDrillCard.js'
 
 /**
  * 本插件需要的浏览器服务：**只有槽位**（UI 是硬依赖：没槽位就没面板）。
@@ -46,6 +47,11 @@ const DICTS = {
     'state.loading': '读取中…',
     'error.fetch': '取不到考研数学状态',
     'error.unknownShape': '宿主返回了未知版本的状态（插件与宿主版本不匹配？）',
+    'card.today': '考研数学 · 今日题单',
+    'card.progress': '考研数学 · 进度',
+    'card.running': '读取中…',
+    'card.empty': '（没有内容）',
+    'card.truncated': '…还有更多行（展开详情可看全）',
   },
   en: {
     'label': 'Math Drill',
@@ -53,8 +59,16 @@ const DICTS = {
     'state.loading': 'Loading…',
     'error.fetch': 'Cannot reach the math-drill status route',
     'error.unknownShape': 'The host returned an unknown status shape (plugin/host version mismatch?)',
+    'card.today': 'Math Drill · today',
+    'card.progress': 'Math Drill · progress',
+    'card.running': 'Loading…',
+    'card.empty': '(no content)',
+    'card.truncated': '…more lines (open details for the full output)',
   },
 } as const
+
+/** 注册卡片的工具名（keyed 分发值 = wire 工具名；改这里必须同步 `src/tools.js` 的工具名）。 */
+export const TOOL_CARD_KEYS = ['math_drill_progress', 'math_drill_today'] as const
 
 /** 字典键类型（zh 为基准；en 必须键对齐）。 */
 type MessageKey = keyof (typeof DICTS)['zh']
@@ -174,6 +188,16 @@ export function apply(ctx: {
     // 只有在真的注册过字典时才声明命名空间：否则渲染器会去找一个不存在的命名空间
     ...(locale === undefined ? {} : { locale: NS }),
   }, MathDrillDock))
+
+  // 工具卡片：keyed `tool.call.toolview`，key = wire 工具名。
+  // ⚠️ keyed 命中**会替换**通用行 ⇒ 卡片必须自己把输出画出来（见 MathDrillCard 的文件头注释）。
+  for (const key of TOOL_CARD_KEYS) {
+    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+      name: 'tool.call.toolview',
+      key,
+      ...(locale === undefined ? {} : { locale: NS }),
+    }, MathDrillCard))
+  }
 }
 
 /** 测试用导出：字典（键对齐与文案断言都在测试里）。 */

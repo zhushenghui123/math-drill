@@ -34,6 +34,55 @@ window.__ModuleLoader__.load({
 			if (candidate.schemaVersion !== 1) return false;
 			return typeof candidate.ok === "boolean";
 		}
+		const BOX_STYLE$1 = {
+			border: "0.5px solid var(--dsw-alias-border-l2)",
+			borderRadius: "8px",
+			padding: "6px 10px",
+			margin: "4px 0",
+			fontSize: "12px",
+			lineHeight: "1.6"
+		};
+		const HEAD_STYLE = {
+			display: "flex",
+			alignItems: "center",
+			gap: "6px",
+			marginBottom: "2px",
+			opacity: .9
+		};
+		const BODY_STYLE = {
+			whiteSpace: "pre-wrap",
+			fontFamily: "inherit",
+			margin: 0
+		};
+		/** 卡片状态：运行中 / 成功 / 出错（官方 `ToolRowState` 的口径，这里只取我们要的三档）。 */
+		function cardState(block) {
+			if (block === void 0 || block.kind === void 0) return "running";
+			return block.isError === true ? "error" : "ok";
+		}
+		/** 文本内容行：取 `content` 里的 text 块（非 text 块一律忽略）。 */
+		function cardLines(block) {
+			return (block?.content ?? []).filter((entry) => entry?.type === "text" && typeof entry.text === "string").flatMap((entry) => String(entry.text).split("\n"));
+		}
+		/**
+		* 渲染一张 `math_drill_*` 卡片。
+		*
+		* @param props - 槽位渲染器组合出来的 props（见文件头的数据面说明）。
+		* @returns React 元素。
+		*/
+		function MathDrillCard(props) {
+			const translate = (key, fallback) => typeof props.t === "function" ? props.t(key) : fallback;
+			const state = cardState(props.block);
+			const lines = cardLines(props.block);
+			const shown = lines.slice(0, 12);
+			const hidden = lines.length - shown.length;
+			const title = props.toolName === "math_drill_today" ? translate("card.today", "考研数学 · 今日题单") : translate("card.progress", "考研数学 · 进度");
+			const mark = state === "running" ? "⏳" : state === "error" ? "⚠️" : "✓";
+			const body = shown.length > 0 ? shown.join("\n") : state === "running" ? translate("card.running", "读取中…") : props.block?.error?.code ?? translate("card.empty", "（没有内容）");
+			return (0, react.createElement)("div", {
+				style: BOX_STYLE$1,
+				"data-math-drill": "card"
+			}, (0, react.createElement)("div", { style: HEAD_STYLE }, (0, react.createElement)("span", null, mark), (0, react.createElement)("span", null, title)), (0, react.createElement)("pre", { style: BODY_STYLE }, body), hidden > 0 ? (0, react.createElement)("div", { style: { opacity: .7 } }, translate("card.truncated", `…还有 ${hidden} 行（展开详情可看全）`)) : null);
+		}
 		//#endregion
 		//#region src/client/index.ts
 		/**
@@ -62,16 +111,28 @@ window.__ModuleLoader__.load({
 				"action.refresh": "刷新",
 				"state.loading": "读取中…",
 				"error.fetch": "取不到考研数学状态",
-				"error.unknownShape": "宿主返回了未知版本的状态（插件与宿主版本不匹配？）"
+				"error.unknownShape": "宿主返回了未知版本的状态（插件与宿主版本不匹配？）",
+				"card.today": "考研数学 · 今日题单",
+				"card.progress": "考研数学 · 进度",
+				"card.running": "读取中…",
+				"card.empty": "（没有内容）",
+				"card.truncated": "…还有更多行（展开详情可看全）"
 			},
 			en: {
 				"label": "Math Drill",
 				"action.refresh": "Refresh",
 				"state.loading": "Loading…",
 				"error.fetch": "Cannot reach the math-drill status route",
-				"error.unknownShape": "The host returned an unknown status shape (plugin/host version mismatch?)"
+				"error.unknownShape": "The host returned an unknown status shape (plugin/host version mismatch?)",
+				"card.today": "Math Drill · today",
+				"card.progress": "Math Drill · progress",
+				"card.running": "Loading…",
+				"card.empty": "(no content)",
+				"card.truncated": "…more lines (open details for the full output)"
 			}
 		};
+		/** 注册卡片的工具名（keyed 分发值 = wire 工具名；改这里必须同步 `src/tools.js` 的工具名）。 */
+		const TOOL_CARD_KEYS = ["math_drill_progress", "math_drill_today"];
 		/**
 		* 文案取词：优先用槽位渲染器绑进来的 `t`（`locale: NS` 的产物），没有则回退 zh 字典。
 		*
@@ -183,12 +244,18 @@ window.__ModuleLoader__.load({
 				order: 20,
 				...locale === void 0 ? {} : { locale: NS }
 			}, MathDrillDock));
+			for (const key of TOOL_CARD_KEYS) ctx.slots.inject("tool.call.toolview", () => ctx.slots.register({
+				name: "tool.call.toolview",
+				key,
+				...locale === void 0 ? {} : { locale: NS }
+			}, MathDrillCard));
 		}
 		/** 测试用导出：字典（键对齐与文案断言都在测试里）。 */
 		const dictionaries = DICTS;
 		/** 测试用导出：文案命名空间。 */
 		const localeNamespace = NS;
 		//#endregion
+		exports.TOOL_CARD_KEYS = TOOL_CARD_KEYS;
 		exports.apply = apply;
 		exports.dictionaries = dictionaries;
 		exports.inject = inject;
