@@ -36,8 +36,17 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/client/index.ts
-		/** 本插件需要的浏览器服务：槽位（UI）+ locale（文案字典）。 */
-		const inject = ["slots", "locale"];
+		/**
+		* 本插件需要的浏览器服务：**只有槽位**（UI 是硬依赖：没槽位就没面板）。
+		*
+		* 为什么 `locale` **不写成 inject**（2026-09-20 定点复查的清单项）：
+		* 硬 `inject` 的语义是"服务不出现就一直等" ⇒ 若某个宿主没有 locale 服务，插件会**静默不激活**
+		* （面板整块不见、也不报错），比"没座位就用回退字典"糟得多。
+		* 官方 Skill 的取向也正是"默认 `ctx.get(name)` + 自检缺失，只有真硬依赖才 inject"
+		* （`参考-DSH官方文档-20260920/官方Skill-cordis-plugin-development.md` 的 "Access Services" 段）。
+		* ⇒ locale 走 `ctx.get('locale')`，缺失时用本地回退字典（同一份 `DICTS`，不是第二份真值）。
+		*/
+		const inject = ["slots"];
 		/** 文案命名空间（与 `slots.register` 的 `locale` 选项同值）。 */
 		const NS = "math-drill";
 		/**
@@ -162,14 +171,17 @@ window.__ModuleLoader__.load({
 		* @param ctx - DSH 客户端上下文（cordis）。
 		*/
 		function apply(ctx) {
-			const registerDicts = () => ctx.locale.register(NS, DICTS);
-			if (typeof ctx.effect === "function") ctx.effect(registerDicts, `${NS}: dictionaries`);
-			else registerDicts();
+			const locale = typeof ctx.get === "function" ? ctx.get("locale") : ctx.locale;
+			if (locale !== void 0) {
+				const registerDicts = () => locale.register(NS, DICTS);
+				if (typeof ctx.effect === "function") ctx.effect(registerDicts, `${NS}: dictionaries`);
+				else registerDicts();
+			}
 			ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
 				name: "conversation.input.dock",
 				id: SLOT_ID,
 				order: 20,
-				locale: NS
+				...locale === void 0 ? {} : { locale: NS }
 			}, MathDrillDock));
 		}
 		/** 测试用导出：字典（键对齐与文案断言都在测试里）。 */

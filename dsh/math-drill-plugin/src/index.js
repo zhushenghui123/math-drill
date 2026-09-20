@@ -25,14 +25,6 @@ export { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
 /** cordis 诊断用的插件名（与 cordis.patch.yml 的 id 对应）。 */
 export const name = 'math-drill-dsh'
 
-/**
- * 客户端半边（浏览器）读的只读状态路由。
- *
- * @deprecated 真源已移到 `src/shared/contract.js` 的 `STATE_PATH`（两边相对 import，消掉两处真值）。
- * 这里保留别名只为不破坏已有引用；**新代码请用 `STATE_PATH`**。
- */
-export const SUMMARY_PATH = STATE_PATH
-
 /** 本插件需要的服务：工具面（agent 用）+ 宿主 web 服务器（客户端半边用）。其余数据面走 HTTP。 */
 export const inject = ['tools', 'webServer']
 

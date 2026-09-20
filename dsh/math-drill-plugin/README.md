@@ -66,10 +66,31 @@ node --test /home/myuser/workspaces/DeepSeek/math-drill/dsh/math-drill-plugin/te
 | `credentialEnv` | `MATH_DRILL_AGENT_CREDENTIAL` | 环境变量覆盖位 |
 | `timeoutMs` | `10000` | 单次请求预算 |
 
-## 还没做（Phase B）
+## 客户端半边（Phase B，**已落地** 2026-09-19/20）
 
-**客户端半边（UI 槽位面板）**。它要的是 DSH 的浏览器构建产物格式
-（`window.__ModuleLoader__.load({id, factory})`，只能 `require` 平台模块：`react`、`react-dom`、
-`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-ui-slots` 等），因此需要 `tsdown` 工具链
-（照 `~/.dsh/skins/maid-atelier/build/tsdown.client.ts` 的预设）。**在那之前不要手写
-`lib/client.js` 的包装**：那是把构建产物当源码维护，属于本项目的"两处真值"病。
+`src/client/index.ts` 往 **追加型**槽位 `conversation.input.dock` 注册一条状态条（`list` 型，不碰 `single`）。
+数据经**宿主半边**的只读路由 `/math-drill/summary`（`STATE_PATH`）取 —— **服务间凭据不进浏览器**，
+浏览器只拿到已剥掉答案的文本。
+
+| 关注点 | 落点 |
+|---|---|
+| 两半共用的路径/版本/形状判定 | `src/shared/contract.js`（相对 import ⇒ 被 tsdown **内联**，不落 `require` 表） |
+| 文案 | `math-drill` locale 命名空间（zh/en **键对齐**，有测试）；`locale` 是**可选**服务（`ctx.get('locale')`），缺失时回退同一份字典而非静默不激活 |
+| 样式 | 只用 `--dsw-alias-*` 语义 token（`--dsw-alias-border-l2` 0.5px 发丝线 + `--dsw-alias-brand-primary`）；**不**用 `--dsw-elevation-*`（本机 0.1.1-rc.1 全树零命中） |
+| 产物 | `lib/client.js` = `window.__ModuleLoader__.load({id, factory})` 包装，`require` 只落平台表（`build/web-platform.ts`） |
+
+```bash
+node tools/build-client.mjs      # 构建产物；⚠️ 改了 src/client/** 必须重跑（产物入仓、不会自己更新）
+node --test tests/               # 28 条：凭据纪律 / wire / 红线 / 接线 / 产物形状 / **产物运行时**
+```
+
+> ⚠️ **升级宿主 DSH 前**：`build/web-platform.ts` 的 `PLATFORM_MODULES` 是**快照不是契约**（ADR-015 代价 1）。
+> 若新版把 `@deepseek-ai/dsh-client-ui-slots` / `dsh-client-locale` 移出表，客户端产物会**当场抛错、状态条整块不出现**。
+
+## 还没做
+
+- **C2 工具卡片**（`tool.call.toolview`，key = 工具名）：让 `math_drill_today` 的结果在对话里是卡片。
+- **C3 设置页**（`settings.section`）：把 `baseUrl` / 凭据路径搬进设置界面。
+- **C4 斜杠命令**（如 `/math`）：契约点在 `packages/extensions/ui-cordis/src/client/index.ts:168` 的 `slash.registerSource`。
+
+三条都**要求先查契约再动手**（官方 Skill 的原话：不要从服务名/槽位名/示例反推 API）。

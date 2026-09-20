@@ -48,7 +48,7 @@ function fakeReact() {
 }
 
 /** 把产物当浏览器脚本执行：抓注册、materialize、跑 apply。 */
-async function loadBundle() {
+async function loadBundle(options = {}) {
   const registrations = []
   const calls = { fetch: [], registered: [], injected: [], dictionaries: [], effects: [] }
 
@@ -67,14 +67,16 @@ async function loadBundle() {
   }
   const exports = factory(require)
 
+  const localeService = {
+    register: (namespace, dictionaries) => { calls.dictionaries.push({ namespace, dictionaries }); return () => {} },
+  }
   const ctx = {
     slots: {
       inject: (name, callback) => { calls.injected.push(name); callback() },
       register: (options, component) => { calls.registered.push({ options, component }); return () => {} },
     },
-    locale: {
-      register: (namespace, dictionaries) => { calls.dictionaries.push({ namespace, dictionaries }); return () => {} },
-    },
+    // locale 是**可选**服务：按官方取向用 ctx.get 取（不声明 inject ⇒ 缺失也不会挂起插件）
+    get: (name) => (name === 'locale' ? (options.withLocale === false ? undefined : localeService) : undefined),
     effect: (factory) => { calls.effects.push(factory); return factory(); },
   }
   exports.apply(ctx)
@@ -89,7 +91,7 @@ describe('产物运行时（按 loader 契约真执行）', () => {
     }
     const { id, exports, calls } = await loadBundle()
     assert.equal(id, BUNDLE_ID)
-    assert.deepEqual(exports.inject, ['slots', 'locale'])
+    assert.deepEqual(exports.inject, ['slots'], 'locale 是可选服务，不该进 inject')
     assert.equal(typeof exports.apply, 'function')
     assert.equal(calls.effects.length, 1, '字典注册必须包在 effect 里（可卸载）')
     assert.equal(calls.dictionaries.length, 1, '要注册一份文案字典')
@@ -98,7 +100,7 @@ describe('产物运行时（按 loader 契约真执行）', () => {
     assert.equal(calls.registered.length, 1)
     assert.deepEqual(calls.registered[0].options, {
       name: 'conversation.input.dock', id: 'math-drill', order: 20, locale: 'math-drill',
-    })
+    }, '有 locale 服务时应声明命名空间')
     assert.equal(typeof calls.registered[0].component, 'function')
   })
 
@@ -213,5 +215,21 @@ describe('产物运行时（按 loader 契约真执行）', () => {
       globalThis.fetch = originalFetch
       delete globalThis.window
     }
+  })
+})
+
+describe('locale 缺失时的行为（定点复查清单项：不能静默不激活）', () => {
+  it('宿主没有 locale 服务 ⇒ 插件照常激活、仍注册槽位、且**不**声明命名空间', async (t) => {
+    if (!existsSync(artifact)) {
+      t.skip('lib/client.js 还没构建')
+      return
+    }
+    const { calls } = await loadBundle({ withLocale: false })
+    assert.equal(calls.dictionaries.length, 0, '没有服务就不该注册字典')
+    assert.equal(calls.registered.length, 1, '槽位注册必须照常发生（不能静默不激活）')
+    assert.equal('locale' in calls.registered[0].options, false, '没注册字典就不该声明命名空间')
+    // 渲染仍要能出字（走回退字典，同一份 DICTS）
+    const rendered = JSON.stringify(calls.registered[0].component({}))
+    assert.match(rendered, /考研数学/)
   })
 })

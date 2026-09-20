@@ -278,6 +278,8 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 
 | **v2.19** | 2026-09-20 | **DSH 插件对标改进（B1–B4 落地 / C1 驳回 / C5 维持）** —— 依据 2026-09-20 独立评审（`~/workspaces/claude/复核报告-math-drill-DSH插件对标改进-20260920.md`，判"有保留地可施工：2 阻塞 + 13 清单 + 2 改判"）。① **B4 消掉两处真值**：新增 **`dsh/math-drill-plugin/src/shared/contract.js`**（`STATE_PATH` + `STATE_SCHEMA_VERSION` + `isStateResponse`），宿主与客户端**相对 import** ⇒ tsdown 内联；**并实测**（评审 Z1 要求）：产物里仍只 `require("react")`，purity 闸门未拦。响应体加 `schemaVersion`，客户端遇未知版本**明说**而不是硬读。② **B1 文案进 locale 字典**：`src/client/index.ts` 注册 `math-drill` 命名空间（zh/en **键对齐**，有测试），槽位注册带 `locale: NS`，组件优先用座位 `t`、无座位时回退**同一份字典**（不是第二份真值）；源码里产品可见字符串**只剩字典**（验收口径含"注释除外"）。③ **B2 样式换语义 token**：改用 `--dsw-alias-border-l2` / `--dsw-alias-brand-primary`，中性边框 `0.5px`；**不**用 `--dsw-elevation-*` —— 评审实测该前缀在本机 0.1.1-rc.1 **全树零命中**，且本元素是扁平行不是浮层。④ **B3 信息边补全包名**：`dsh.client.inject` 由 `[]` 改为 `["@deepseek-ai/dsh-client-ui-slots","@deepseek-ai/dsh-client-locale"]`（评审 Q1：该字段定义是 **package-name** 边，官方 40+ 例与本机 4 个第三方插件**无一例外**）。⑤ **C1 驳回并接受**：`immediately: true` 是**基础设施行**专用（官方 10 例全是 locale/runtime/theme/hmr 之类），我们的追加型状态条用它=滥用 ⇒ **不加**。⑥ **C5 维持不换槽位**：`composition.dock` 带 `!hero` 守卫（`ConversationRoot.tsx:156`）、`input.dock` 没有（`:164`），而 hero 对"刚开但空白的会话"也为真 ⇒ 换过去会在最该出现的时刻消失。⑦ **评审自身纠正一条**：list 型槽位**确有**影子化优先级（`ui-slots/src/index.ts:490-496` "Cell shadowing rank"）—— 我原先的担忧成立。⑧ **同批修掉评审点出的账本漂移**：真值树里的测试条数（原写 17，实为 **27**，"以实跑为准"）；`dsh/参考-官方文档与生态.md` 的素材文件名/路径对照、`--dsw-alias-*` 计数改为**两个口径**（定义 78 / 出现去重 80）、补"升级宿主前重取 `PLATFORM_MODULES`"前置条件。⑨ **未做**（评审判该做但需先查契约）：C2 工具卡片、C3 设置页、C4 斜杠命令 —— 开工前先查 `Slots.listSubTree` 与 `slash.registerSource`（`packages/extensions/ui-cordis/src/client/index.ts:168`）。 |
 
+| **v2.20** | 2026-09-20 | **定点复查（第二轮）的账本修复：3 阻塞 + 7 清单全部就地改** —— 复查报告 `~/workspaces/claude/复核报告-math-drill-DSH插件对标改进-定点复查-20260920.md`（落地面 **14/14 全对**，账本面 3 阻塞；其判词："账本自身的假落点比落点错更毒 —— 下一轮的开工依据就是账本"）。① **假落点**：任务书 §12 声称"§5 B1 已改引 `:115`"而 §5 实际仍写 `:113` ⇒ **§5 依据行就地改成 `:115`**（并注明原值），§12 那句由假变真。② **被推翻的原句留着**（`§5` 仍引 `:24` elevation、仍写"79 个"、仍是不可执行的"从宿主导出"）⇒ **三处全部就地改写**（不追加）：改引 `web-styling.zh.md:21`+`:25`、计数改两口径（定义 78 / 出现去重 80）、B4 验收改为"共用契约 + 实测 build"。**这是本项目第二次记录"在别处追加说明、被修正原句原样留着"的形态**。③ **新文件未进真值树**：`src/shared/contract.js`（B4 契约的唯一真源）与既存的 `src/summarize.js` 都缺席 ⇒ 两处真值树（本文 §11.9 的 `dsh/` 段 + `dsh/README.md` 目录树）已补。④ **代码侧两条**：删掉**无引用方**的死导出 `SUMMARY_PATH`；`locale` **移出 `inject`** 改走 `ctx.get('locale')` —— 硬 inject 会让宿主缺该服务时**整块面板静默不激活**（比"没座位就回退"糟），并新增 1 条测试专测"没有 locale 服务也照常激活、照常注册槽位"。⑤ **live 陈述扫干净**：`dsh/README.md`（分期段/目录树/构建提醒/明确不做）、`dsh/math-drill-plugin/README.md`（"还没做 Phase B"→ 已落地那节；它进 `files`）、`DECISIONS.md:271`（"Phase B 未开工"→"也已完成"）。⚠️ **本轮我自己又踩一次同型坑**：改完 `src/client/index.ts` 直接跑测试 ⇒ 全红，因为**产物 `lib/client.js` 不会自己更新**；已在两处 README 写明"改了 `src/client/**` 必须重跑 `node tools/build-client.mjs`"。⑥ 插件测试 **28** 条（本行即当前口径）。 |
+
 ---
 
 ## 10.（v2.1 追加）模块化骨架 —— 吸收决策人 whale-moe 项目的排版章法（ADR-006）
@@ -529,11 +531,14 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 ├── references/                    # 调研/对拍留档（含版权样本）——**.gitignore 排除，不入版本控制**（与 data/ 同待遇，v2.8 消解与 H8「版权数据零入仓」的冲突；不进仓库即不进远端）
 ├── patches/                       # fork 上游补丁留痕（ADR-006 / §10.1；Phase 1 为空占位目录）
 ├── dsh/                           # ★ DSH 插件集宿主层（**ADR-015**）：客户端插件（UI 槽位）+ 桥接插件（数据/工具）
-│   ├── README.md                  #   目录定位、安装/凭据步骤、分期（Phase A 已落地 / B 未开工）、已知限制
-│   └── math-drill-plugin/         #   桥接插件（宿主半边，Phase A）：只读数据通路 + 两个 agent 工具
+│   ├── README.md                  #   目录定位、安装/凭据步骤、分期（Phase A/B 均已落地）、已知限制
+│   ├── 参考-官方文档与生态.md      #   官方 Skill/文档 + 社区对标物 + 逐条对照（2026-09-20 调研，含素材哈希清单）
+│   └── math-drill-plugin/         #   桥接插件（宿主半边 + 客户端半边）：只读数据通路 + 两个 agent 工具 + 状态条
 │       ├── package.json           #   `dsh.bundle.patch` 声明 ⇒ `dsh plugin add` 自动进 profile 的 bundles
 │       ├── cordis.patch.yml       #   bundle 补丁：只 `insert` 一行（不放凭据值，只有路径/环境变量名）
-│       ├── src/index.js           #   cordis 插件：name / inject / Config / apply
+│       ├── src/index.js           #   cordis 插件（宿主半边）：name / inject / Config / apply + 只读状态路由
+│       ├── src/shared/contract.js #   ★ 两半**共用契约**（STATE_PATH / STATE_SCHEMA_VERSION / isStateResponse）
+│       │                          #     相对 import ⇒ 被 tsdown 内联，不落 require 表（评审 Z1 的正解）
 │       ├── src/credential.js      #   服务间凭据读取（0600 校验；**永不打印**）
 │       ├── src/math-drill-api.js  #   只读 HTTP 客户端（只有 GET /api/state、/api/daily —— 无写方法）
 │       ├── src/client/index.ts    #   客户端半边（浏览器）：注册 conversation.input.dock（list 型，追加）
@@ -544,7 +549,7 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │       ├── src/summarize.js       #   纯函数核（无 harness 依赖 ⇒ 仓库内可直接测）
 │       ├── src/tools.js           #   `defineTool` 接线层
 │       ├── tools/link-dsh-deps.mjs #  把 `@deepseek-ai/*` 链到本机 DSH（`link:` 装的插件必须自带可解析依赖）
-│       └── tests/                 #   node --test（当前 27 条：凭据纪律 / wire 行为 / 红线 / 接线 / 产物形状 / 产物运行时；条数以实跑为准）
+│       └── tests/                 #   node --test（当前 **28** 条：凭据纪律 / wire 行为 / 红线 / 接线 / 产物形状 / 产物运行时；条数以实跑为准）
 │                                  #   ⚠️ 目录已创建（v2.16）；refcheck 的 TOP_DOMAINS 已补 `dsh`（v2.16，机械护栏就位）
 ├── README.md  LICENSE  ATTRIBUTION  THIRD_PARTY_NOTICES.md  .gitignore
 ```

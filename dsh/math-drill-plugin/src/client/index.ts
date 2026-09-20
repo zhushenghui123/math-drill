@@ -17,8 +17,17 @@ import { createElement as h, useCallback, useEffect, useState } from 'react'
 // 相对 import ⇒ 被 tsdown 内联进产物（不是 require），与宿主半边共用同一份契约（评审 Z1 的正解）
 import { isStateResponse, STATE_PATH } from '../shared/contract.js'
 
-/** 本插件需要的浏览器服务：槽位（UI）+ locale（文案字典）。 */
-export const inject = ['slots', 'locale']
+/**
+ * 本插件需要的浏览器服务：**只有槽位**（UI 是硬依赖：没槽位就没面板）。
+ *
+ * 为什么 `locale` **不写成 inject**（2026-09-20 定点复查的清单项）：
+ * 硬 `inject` 的语义是"服务不出现就一直等" ⇒ 若某个宿主没有 locale 服务，插件会**静默不激活**
+ * （面板整块不见、也不报错），比"没座位就用回退字典"糟得多。
+ * 官方 Skill 的取向也正是"默认 `ctx.get(name)` + 自检缺失，只有真硬依赖才 inject"
+ * （`参考-DSH官方文档-20260920/官方Skill-cordis-plugin-development.md` 的 "Access Services" 段）。
+ * ⇒ locale 走 `ctx.get('locale')`，缺失时用本地回退字典（同一份 `DICTS`，不是第二份真值）。
+ */
+export const inject = ['slots']
 
 /** 文案命名空间（与 `slots.register` 的 `locale` 选项同值）。 */
 const NS = 'math-drill'
@@ -138,19 +147,28 @@ function MathDrillDock(props: unknown) {
  */
 export function apply(ctx: {
   slots: { inject: (name: string, factory: () => unknown) => void; register: (options: Record<string, unknown>, component: unknown) => unknown }
-  locale: { register: (namespace: string, dictionaries: Record<string, unknown>) => unknown }
+  /** 可选服务：用 `ctx.get('locale')` 取，不声明 inject（见 `inject` 的注释）。 */
+  get?: (name: string) => unknown
+  locale?: { register: (namespace: string, dictionaries: Record<string, unknown>) => unknown }
   effect?: (factory: () => unknown, label?: string) => unknown
 }): void {
-  // 字典注册包在 effect 里 ⇒ 卸载/热替换时自动撤销（官方同款：ui-cordis/src/client/index.ts:41）
-  const registerDicts = () => ctx.locale.register(NS, DICTS)
-  if (typeof ctx.effect === 'function') ctx.effect(registerDicts, `${NS}: dictionaries`)
-  else registerDicts()
+  // locale 是**可选**服务：缺失时面板用回退字典（同一份 DICTS），而不是把插件挂起
+  const locale = (typeof ctx.get === 'function' ? ctx.get('locale') : ctx.locale) as
+    | { register: (namespace: string, dictionaries: Record<string, unknown>) => unknown }
+    | undefined
+  if (locale !== undefined) {
+    // 字典注册包在 effect 里 ⇒ 卸载/热替换时自动撤销（官方同款：ui-cordis/src/client/index.ts:41）
+    const registerDicts = () => locale.register(NS, DICTS)
+    if (typeof ctx.effect === 'function') ctx.effect(registerDicts, `${NS}: dictionaries`)
+    else registerDicts()
+  }
 
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock',
     id: SLOT_ID,
     order: 20,
-    locale: NS,
+    // 只有在真的注册过字典时才声明命名空间：否则渲染器会去找一个不存在的命名空间
+    ...(locale === undefined ? {} : { locale: NS }),
   }, MathDrillDock))
 }
 

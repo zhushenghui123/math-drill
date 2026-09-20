@@ -10,16 +10,23 @@
 dsh/
 ├── README.md                      # 本文件
 ├── 参考-官方文档与生态.md          # ★ 官方 Skill/文档 + 社区对标物 + 逐条对照我们的实现（2026-09-20 调研）
-└── math-drill-plugin/             # 桥接插件（宿主半边，Phase A）
+└── math-drill-plugin/             # 桥接插件（宿主半边 + 客户端半边；Phase A/B 均已落地）
     ├── package.json               # dsh.bundle.patch 声明 ⇒ `dsh plugin add` 会自动挂进 profile 的 bundles
     ├── cordis.patch.yml           # bundle 补丁：往组合树里 insert 一行（含 config）
     ├── README.md                  # 安装 / 配置 / 凭据 / 工具面
     ├── src/
-    │   ├── index.js               # cordis 插件：name / inject / Config / apply
+    │   ├── index.js               # cordis 插件（宿主半边）：name / inject / Config / apply + 只读状态路由
     │   ├── credential.js          # 服务间凭据读取（0600 校验；**永不打印**）
     │   ├── math-drill-api.js      # math-drill HTTP 客户端（**只读**：GET /api/state、/api/daily）
+    │   ├── shared/contract.js     # ★ 两半共用契约（STATE_PATH / schemaVersion / isStateResponse）
+    │   ├── summarize.js           # 纯函数核（无 harness 依赖 ⇒ 仓库内可直接测）
+    │   ├── client/index.ts        # 客户端半边（浏览器）：conversation.input.dock 状态条 + locale 字典
     │   └── tools.js               # agent 面向的两个只读工具（**剥掉答案**）
-    └── tests/plugin.test.mjs      # `node --test`（零第三方依赖：假上游 + 真断言）
+    ├── build/web-platform.ts      # 平台模块表（快照；**升级宿主前必须重取**）
+    ├── tsdown.config.ts           # 客户端产物构建（镜像官方 clientConfig）
+    ├── tools/build-client.mjs     # 构建壳（调用本机已有 tsdown，不联网）
+    ├── lib/client.js              # ★ 构建产物（入仓；**改了 src/client 必须重跑 build**）
+    └── tests/                     # `node --test`（假上游 + 假 loader + 真断言；28 条）
 ```
 
 ## 安装（本机 DSH）
@@ -75,13 +82,15 @@ chmod 600 ~/.dsh/math-drill/agent-credential
 
 ## 分期（与 ADR-015 决策 2 一致）
 
-- **Phase A（已落地）**：宿主半边 —— 只读数据通路 + 两个 agent 工具（进度 / 今日题单）。
-  不需要浏览器构建工具链，装完即用。
-- **Phase B（未开工）**：客户端半边（UI 槽位面板）。**它需要 DSH 的浏览器构建产物格式**
-  （`window.__ModuleLoader__.load({id, factory})`，只允许 `react` / `react-dom` / `@deepseek-ai/cordis` /
-  `@deepseek-ai/dsh-client-ui-slots` 等平台模块），因此要先把 `tsdown` 工具链装进本插件的 devDependencies
-  （参考 `~/.dsh/skins/maid-atelier/build/tsdown.client.ts` 的预设）。
-  **在 Phase B 之前不要手写 `lib/client.js` 的包装**——那是把构建产物当源码维护，正是本项目的"两处真值"病。
+- **Phase A（已落地）**：宿主半边 —— 只读数据通路 + 两个 agent 工具（进度 / 今日题单）+ 只读状态路由。
+- **Phase B（已落地，2026-09-19/20）**：客户端半边 —— `conversation.input.dock`（**追加位**）里的状态条；
+  文案走 `math-drill` locale 命名空间（zh/en 键对齐），样式只用 `--dsw-alias-*` 语义 token。
+  产物是 `window.__ModuleLoader__.load({id, factory})` 包装，由 `tsdown.config.ts` 构建（镜像官方 per-package 预设，
+  去掉我们用不到的 CSS Modules 段）。
+  ⚠️ **改了 `src/client/**` 必须重跑 `node tools/build-client.mjs`** —— 产物 `lib/client.js` 是入仓的、不会自己更新
+  （本轮吃过一次：改了源码没重建，测试立刻红）。
+- **明确不做的**（2026-09-20 评审定案）：`dsh.client.immediately: true`（那是基础设施行专用）；
+  换槽位到 `conversation.composer.dock`（它带 `!hero` 守卫，会在"刚开新会话"时消失）。
 - **0 号步 d**（ADR-015 分期）：先在这台笔记本上把 DSH 用起来，看 agent 到底帮不帮得上学习；
   插件只提供数据与工具，判断留给使用体验。
 
