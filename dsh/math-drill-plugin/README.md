@@ -88,12 +88,17 @@ node --test /home/myuser/workspaces/DeepSeek/math-drill/dsh/math-drill-plugin/te
    `["@deepseek-ai/dsh-client-ui-slots","@deepseek-ai/dsh-client-locale"]`；
    而 `src/client/index.ts` 的运行期 `inject` 只有 `['slots']`（locale 是**可选**服务，走 `ctx.get`）。
    **删掉那个 locale 包边会抹掉"我们确实碰过 locale 包"的唯一记录** —— 下次想找谁在用 locale 时就没有线索了。
-2. ⚠️ **locale 晚到的失败模式（已知、未修）**：`ctx.get('locale')` 是**一次性读取、不重试**。
-   若某个宿主先激活我们的插件、后提供 locale 服务，则本次进程内**永久走中文回退字典**
+2. ⚠️ **locale 晚到的失败模式（已知、未修；2026-09-20 已真机测严重度）**：`ctx.get('locale')` 是**一次性读取、不重试**。
+  若某个宿主先激活我们的插件、后提供 locale 服务，则本次进程内**永久走中文回退字典**
    （面板照常出现，只是不跟随宿主语言）。竞态依据：官方 Skill 的 "Access Services" 段（声明 `inject` 才会等它重新激活）。
-   官方第三条路 `ctx.inject(deps, cb)`（≡ 挂一个带 `inject` 的子插件）能等到 locale 再回调，
-   但**把槽位注册挪进回调会退回"面板可能永不出现"**，比现在更糟 ⇒ **当前实现是局部最优**，
-   登记在此、不在 N=1（中文用户）场景下引复杂度。**若将来要支持英文宿主，这是第一个要改的地方。**
+  官方第三条路 `ctx.inject(deps, cb)`（≡ 挂一个带 `inject` 的子插件）能等到 locale 再回调，
+  但**把槽位注册挪进回调会退回"面板可能永不出现"**，比现在更糟 ⇒ **当前实现是局部最优**，
+  登记在此、不在 N=1（中文用户）场景下引复杂度。**若将来要支持英文宿主，这是第一个要改的地方。**
+
+   **真机实测（2026-09-20，`dsh web --no-open --port 37795`）**：页面里的 boot roster 共 48 条，
+  `@deepseek-ai/dsh-client-locale` 在**第 10 位**、`@math-drill/dsh-plugin` 在**第 46 位**，
+  **且 locale 那一行带 `immediately: true`**（stage-one 预取）⇒ 我们的半边几乎不可能先于 locale 激活，
+  该竞态在本机拓扑下**实际不会发生**（记录备将来换宿主/改组合时复查）。
 
 ```bash
 node tools/build-client.mjs      # 构建产物；⚠️ 改了 src/client/** 必须重跑（产物入仓、不会自己更新）
