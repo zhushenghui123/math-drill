@@ -20,7 +20,7 @@ import { after, before, describe, it } from 'node:test'
 
 import { createMathDrillClient, MathDrillError } from '../src/math-drill-api.js'
 import { CredentialError, readCredential } from '../src/credential.js'
-import { daysUntil, stripQuestionAnswers, summarizeDaily, summarizeProgress, toMarkdownMath } from '../src/summarize.js'
+import { daysUntil, stripQuestionAnswers, summarizeBrief, summarizeDaily, summarizeProgress, toMarkdownMath } from '../src/summarize.js'
 
 const CREDENTIAL = 'agent-credential-value-for-tests-0123456789'
 /** 专门用来触发"慢上游"的第二个凭据（假上游据此延迟响应）。 */
@@ -269,5 +269,31 @@ describe('题面公式：裸 LaTeX 环境包成 $$…$$（否则客户端只显�
     }] })
     assert.match(text, /\$\$\\begin\{pmatrix\}/)
     assert.equal(text.includes('answer'), false)
+  })
+})
+
+describe('一行简报（状态条专用）', () => {
+  it('是单行、含今日进度与考试倒计时，不含换行', () => {
+    const now = new Date('2026-09-19T10:00:00')
+    const brief = summarizeBrief({
+      server_version: 7,
+      data: {
+        settings: { examTrack: 'math1', examDate: '2026-12-19' },
+        daily: { date: '2026-09-19', reviewIds: ['a', 'b'], reviewDoneIds: ['a'], newIds: ['c'], newDoneIds: [], quizIds: [], quizDoneIds: [] },
+        checkins: { '2026-09-19': { minutes: 32, tasksDone: false } },
+        cards: {}, notes: {},
+      },
+    }, now)
+    assert.equal(brief.includes('\n'), false, '状态条是一行，不能有换行')
+    assert.match(brief, /今日 1\/3/)
+    assert.match(brief, /还有 91 天/)
+    assert.match(brief, /32 分钟/)
+    assert.match(brief, /数学一/)
+  })
+
+  it('没开局/没设置时也有可读的一行', () => {
+    const brief = summarizeBrief({ data: {} }, new Date('2026-09-19T10:00:00'))
+    assert.equal(brief.includes('\n'), false)
+    assert.match(brief, /今日未开局/)
   })
 })

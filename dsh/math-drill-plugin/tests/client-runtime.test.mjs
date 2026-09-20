@@ -64,7 +64,11 @@ async function loadBundle(options = {}) {
   // 平台表内**允许**的第二个模块：官方的 markdown+KaTeX 渲染件（我们用它渲染题面公式）。
   // 桩只做"可被 createElement 引用"的占位：组件不会被真的调用（假 createElement 不递归渲染），
   // 断言因此落在元素树的 props.text 上。
-  const primitives = { MarkdownText: function MarkdownText() { return null } }
+  const primitives = {
+    MarkdownText: function MarkdownText() { return null },
+    Pill: function Pill() { return null },
+    DisclosureRow: function DisclosureRow() { return null },
+  }
   const require = (specifier) => {
     if (specifier === 'react') return react
     if (specifier === '@deepseek-ai/dsh-client-ui-primitives') return primitives
@@ -144,7 +148,7 @@ describe('产物运行时（按 loader 契约真执行）', () => {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ schemaVersion: STATE_SCHEMA_VERSION, ok: true, text: '数学一 · 复习 1/2', fetchedAt: 1 }),
+        json: async () => ({ schemaVersion: STATE_SCHEMA_VERSION, ok: true, brief: '⚡ 今日 1/2 · 🎯 还有 91 天', text: '数学一 · 复习 1/2', fetchedAt: 1 }),
       }
     }
     try {
@@ -160,10 +164,10 @@ describe('产物运行时（按 loader 契约真执行）', () => {
       // 两次：挂载先置 loading，拿到响应再置 ready（写断言时我自己就先写错过）
       assert.equal(react.state.setters.length, 2, '应先 loading 再写回结果')
       assert.deepEqual(react.state.setters[0], { kind: 'loading' })
-      assert.match(JSON.stringify(react.state.value), /复习 1\/2/)
+      assert.match(JSON.stringify(react.state.value), /今日 1\/2/, '状态条存的是一行简报')
       // 第二次渲染（状态已就绪）应把文本显示出来
       const after = JSON.stringify(component({}))
-      assert.match(after, /复习 1\/2/)
+      assert.match(after, /今日 1\/2/)
     } finally {
       globalThis.fetch = originalFetch
       delete globalThis.window
@@ -178,7 +182,7 @@ describe('产物运行时（按 loader 契约真执行）', () => {
     const { react, calls } = await loadBundle()
     const originalFetch = globalThis.fetch
     globalThis.fetch = async () => ({
-      ok: true, status: 200, json: async () => ({ schemaVersion: STATE_SCHEMA_VERSION, ok: true, text: 'ok', fetchedAt: 1 }),
+      ok: true, status: 200, json: async () => ({ schemaVersion: STATE_SCHEMA_VERSION, ok: true, brief: '⚡ 今日 0/2', text: 'ok', fetchedAt: 1 }),
     })
     try {
       const t = (key) => `EN:${key}`

@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
 		function isStateResponse(payload) {
 			if (payload === null || typeof payload !== "object") return false;
 			const candidate = payload;
-			if (candidate.schemaVersion !== 1) return false;
+			if (candidate.schemaVersion !== 2) return false;
 			return typeof candidate.ok === "boolean";
 		}
 		//#endregion
@@ -54,22 +54,14 @@ window.__ModuleLoader__.load({
 		*
 		* @module @math-drill/dsh-plugin/client/card
 		*/
-		const BOX_STYLE$1 = {
+		const BODY_STYLE = {
 			border: "0.5px solid var(--dsw-alias-border-l2)",
-			borderRadius: "8px",
-			padding: "8px 12px",
-			margin: "6px 0",
+			borderTop: "0",
+			borderRadius: "0 0 8px 8px",
+			padding: "8px 12px 10px",
+			margin: "0 0 6px",
 			fontSize: "12px"
 		};
-		const HEAD_STYLE = {
-			display: "flex",
-			alignItems: "center",
-			gap: "6px",
-			marginBottom: "4px",
-			fontWeight: 600,
-			letterSpacing: "0.01em"
-		};
-		const MARK_STYLE = { opacity: .85 };
 		/** 卡片状态：运行中 / 成功 / 出错（官方 `ToolRowState` 的口径，这里只取我们要的三档）。 */
 		function cardState(block) {
 			if (block === void 0 || block.kind === void 0) return "running";
@@ -92,10 +84,19 @@ window.__ModuleLoader__.load({
 			const title = props.toolName === "math_drill_today" ? translate("card.today", "考研数学 · 今日题单") : translate("card.progress", "考研数学 · 进度");
 			const mark = state === "running" ? "⏳" : state === "error" ? "⚠️" : "✓";
 			const fallback = state === "running" ? translate("card.running", "读取中…") : props.block?.error?.code ?? translate("card.empty", "（没有内容）");
-			return (0, react.createElement)("div", {
-				style: BOX_STYLE$1,
-				"data-math-drill": "card"
-			}, (0, react.createElement)("div", { style: HEAD_STYLE }, (0, react.createElement)("span", { style: MARK_STYLE }, mark), (0, react.createElement)("span", null, title)), body === "" ? (0, react.createElement)("div", { style: { opacity: .75 } }, fallback) : (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, { text: body }));
+			const [open, setOpen] = (0, react.useState)(true);
+			const firstLine = body.split("\n").find((line) => line.trim() !== "") ?? fallback;
+			return (0, react.createElement)("div", { "data-math-drill": "card" }, (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.DisclosureRow, {
+				icon: (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.Pill, { active: state === "ok" }, mark),
+				title: `${title}${body === "" ? "" : ` · ${firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine}`}`,
+				open,
+				expandable: true,
+				onToggle: () => {
+					setOpen((value) => !value);
+				},
+				expandOnRowClick: true,
+				previewChevron: true
+			}, (0, react.createElement)("div", { style: BODY_STYLE }, body === "" ? (0, react.createElement)("div", { style: { opacity: .75 } }, fallback) : (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, { text: body }))));
 		}
 		//#endregion
 		//#region src/client/index.ts
@@ -162,27 +163,25 @@ window.__ModuleLoader__.load({
 		const SLOT_ID = "math-drill";
 		const BOX_STYLE = {
 			display: "flex",
-			alignItems: "flex-start",
-			gap: "10px",
+			alignItems: "center",
+			gap: "8px",
 			flexWrap: "wrap",
-			padding: "6px 12px",
+			padding: "4px 10px",
 			margin: "0 0 6px",
-			borderRadius: "10px",
+			borderRadius: "999px",
 			background: "var(--dsw-alias-bg-layer-1)",
 			border: "0.5px solid var(--dsw-alias-border-l2)",
 			fontSize: "12px",
 			lineHeight: "1.5",
 			opacity: .92
 		};
-		const LABEL_STYLE = {
-			fontWeight: 600,
-			whiteSpace: "nowrap",
-			paddingTop: "1px"
-		};
-		/** 正文用 markdown 渲染（和卡片同一件官方渲染件）⇒ 行距/列表/公式都有正确排版。 */
+		/** 一行式：简报 + 明细留给 `/math` 与卡片（对标物 statusbar / lookatstudy 同形态）。 */
 		const TEXT_STYLE = {
-			flex: "1 1 260px",
-			minWidth: 0
+			flex: "1 1 auto",
+			minWidth: 0,
+			whiteSpace: "nowrap",
+			overflow: "hidden",
+			textOverflow: "ellipsis"
 		};
 		const BUTTON_STYLE = {
 			border: "0.5px solid var(--dsw-alias-border-l2)",
@@ -215,6 +214,7 @@ window.__ModuleLoader__.load({
 					}
 					setState(payload.ok ? {
 						kind: "ready",
+						brief: payload.brief ?? payload.text.split("\n")[0],
 						text: payload.text
 					} : {
 						kind: "failed",
@@ -231,11 +231,14 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				load();
 			}, [load]);
-			const body = state.kind === "loading" ? translate(props, "state.loading") : state.kind === "ready" ? state.text : `⚠️ ${state.message}`;
+			const body = state.kind === "loading" ? translate(props, "state.loading") : state.kind === "ready" ? state.brief : `⚠️ ${state.message}`;
 			return (0, react.createElement)("div", {
 				style: BOX_STYLE,
 				"data-math-drill": "dock"
-			}, (0, react.createElement)("span", { style: LABEL_STYLE }, translate(props, "label")), (0, react.createElement)("div", { style: TEXT_STYLE }, state.kind === "ready" ? (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, { text: body }) : (0, react.createElement)("span", null, body)), (0, react.createElement)("button", {
+			}, (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.Pill, null, translate(props, "label")), (0, react.createElement)("span", {
+				style: TEXT_STYLE,
+				title: state.kind === "ready" ? state.text : void 0
+			}, body), (0, react.createElement)("button", {
 				type: "button",
 				style: BUTTON_STYLE,
 				onClick: () => {

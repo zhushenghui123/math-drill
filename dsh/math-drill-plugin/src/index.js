@@ -16,10 +16,10 @@ import z from '@deepseek-ai/schemastery'
 import { createMathDrillClient, MathDrillError } from './math-drill-api.js'
 import { CredentialError, DEFAULT_CREDENTIAL_RELATIVE_PATH, readCredential } from './credential.js'
 import { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
-import { summarizeDaily, summarizeProgress } from './summarize.js'
+import { summarizeBrief, summarizeDaily, summarizeProgress } from './summarize.js'
 import { createMathDrillTools, MATH_DRILL_TOOL_NAMES } from './tools.js'
 
-export { stripQuestionAnswers, summarizeDaily, summarizeProgress } from './summarize.js'
+export { stripQuestionAnswers, summarizeBrief, summarizeDaily, summarizeProgress } from './summarize.js'
 export { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
 
 /** cordis 诊断用的插件名（与 cordis.patch.yml 的 id 对应）。 */
@@ -121,6 +121,7 @@ export async function apply(ctx, config) {
         res.end(JSON.stringify({
           schemaVersion: STATE_SCHEMA_VERSION,
           ok: true,
+          brief: summarizeBrief(state),
           text: `${summarizeProgress(state)}\n\n${summarizeDaily(daily)}`,
           fetchedAt: Date.now(),
         }))

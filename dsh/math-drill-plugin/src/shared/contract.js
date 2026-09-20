@@ -21,9 +21,9 @@ export const STATE_PATH = '/math-drill/summary'
  *
  * 为什么要它：响应形状在宿主（`src/index.js` 构造）与客户端（`src/client/index.ts` 的类型）各写一份，
  * 改一边忘了另一边就是运行时静默错位；带上版本号，客户端能显式判"这是不是我认识的形状"。
- * 规则：**只增不改** —— 加字段升 1；删字段/改语义才动大版本。
+ * 规则：**只增不改** —— 加字段升 1（v2：加 `brief` 一行简报，给状态条用）；删字段/改语义才动大版本。
  */
-export const STATE_SCHEMA_VERSION = 1
+export const STATE_SCHEMA_VERSION = 2
 
 /**
  * 判定一个响应是不是本客户端认识的形状。

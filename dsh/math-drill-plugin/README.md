@@ -80,7 +80,9 @@ node --test /home/myuser/workspaces/DeepSeek/math-drill/dsh/math-drill-plugin/te
 | 样式 | 只用 `--dsw-alias-*` 语义 token（`--dsw-alias-border-l2` 0.5px 发丝线 + `--dsw-alias-brand-primary`）；**不**用 `--dsw-elevation-*`（本机 0.1.1-rc.1 全树零命中） |
 | 产物 | `lib/client.js` = `window.__ModuleLoader__.load({id, factory})` 包装，`require` 只落平台表（`build/web-platform.ts`） |
 | 工具卡片 | keyed `tool.call.toolview`（key = **wire 工具名**）—— 见下 |
-| 渲染 | 正文与状态条都走官方 **`MarkdownText`**（`@deepseek-ai/dsh-client-ui-primitives`，**平台表内**，内置 KaTeX）⇒ 题面公式渲染成真公式，不再是裸 LaTeX |
+| 渲染 | 正文走官方 **`MarkdownText`**（`@deepseek-ai/dsh-client-ui-primitives`，**平台表内**，内置 KaTeX）⇒ 题面公式渲染成真公式 |
+| 组件 | 状态条标签与卡片状态用官方 **`Pill`**；卡片外壳用官方 **`DisclosureRow`**（受控折叠，默认展开）—— 全是平台表内模块 |
+| 形态 | 状态条**一行式**（`⚡ 今日 0/7 · 🎯 还有 N 天 · 🔥 N 分钟`），明细留给 `/math` 与卡片；契约字段 `brief`（`STATE_SCHEMA_VERSION: 2`） |
 
 ### 公式与排版（2026-09-20 夜，回应"公式没渲染 / 不好看"）
 

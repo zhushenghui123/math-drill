@@ -97,6 +97,42 @@ export function summarizeProgress(blob, now = new Date()) {
 }
 
 /**
+ * `/api/state` 的 blob → **一行**简报（给状态条用；明细留给 `/math` 与卡片）。
+ *
+ * 为什么单独一条：状态条是常驻的窄条，塞多行正文会把输入区顶开、也难扫
+ * （对标物 `statusbar-config` / `lookatstudy` 都是"一行状态丸 + 明细在别处"的形态）。
+ *
+ * @param {Record<string, any>} blob - `{ server_version, data }`。
+ * @param {Date} [now] - 注入"今天"（测试用）。
+ * @returns {string} 无换行的一行。
+ */
+export function summarizeBrief(blob, now = new Date()) {
+  const data = blob?.data ?? {}
+  const settings = data.settings ?? {}
+  const daily = data.daily ?? null
+  const checkins = data.checkins ?? {}
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const checkin = checkins[today] ?? null
+
+  const parts = []
+  if (daily) {
+    const total = countOf(daily.reviewIds) + countOf(daily.newIds) + countOf(daily.quizIds)
+    const done = countOf(daily.reviewDoneIds) + countOf(daily.newDoneIds) + countOf(daily.quizDoneIds)
+    parts.push(`⚡ 今日 ${done}/${total}`)
+  } else {
+    parts.push('⚡ 今日未开局')
+  }
+  if (settings.examDate) {
+    const days = daysUntil(settings.examDate, now)
+    if (days !== null) parts.push(`🎯 还有 ${days} 天`)
+  }
+  if (checkin) parts.push(`🔥 ${checkin.minutes ?? 0} 分钟`)
+  const track = TRACK_NAMES[settings.examTrack]
+  if (track) parts.push(track)
+  return parts.join(' · ')
+}
+
+/**
  * `/api/daily` 的响应 → 短文本（**已剥答案**）。
  *
  * @param {Record<string, any>} payload - `{ server_version, daily, questions }`。

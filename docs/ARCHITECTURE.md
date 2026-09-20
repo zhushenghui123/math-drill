@@ -290,6 +290,8 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 
 | **v2.25** | 2026-09-20 | **UI 美化 + 公式渲染（回应决策人「公式没渲染出来 / 不够好看」）**。① **渲染件换官方的**：`@deepseek-ai/dsh-client-ui-primitives` 的 `MarkdownText({ text })`（内置 KaTeX）—— 该包**本来就在 `build/web-platform.ts` 的平台表里**、其 CSS 随宿主加载 ⇒ **零新依赖、零新机制**；卡片与状态条共用。产物 `require` 从 1 件（react）变 2 件（+ui-primitives），**都在平台表内**，purity 闸门未破。② **裸 LaTeX 包定界符**：题库题面是中文与数学式混排、`\begin{vmatrix}…\end{vmatrix}` **没有 `$`** ⇒ markdown 不当数学渲染、用户看到反斜杠；宿主侧 `summarize.js` 新增 `toMarkdownMath()` 把数学环境包成 `$$…$$`（实测：状态路由文本出现 **16** 处 `$$`，题面渲染为「计算范德蒙德行列式 `$$\begin{vmatrix}…\end{vmatrix}$$` 的值。」）。③ **卡片正文不再按行截断**（按行截会把矩阵公式截半）。④ 状态条加 `--dsw-alias-bg-layer-1` 底色与 10px 圆角，正文由 `<pre>` 纯文本改为 markdown。⑤ **测试 35 条**（+2：`toMarkdownMath` 单测 + `summarizeDaily` 端到端）。⑥ 客户端测试的 `require` 桩同步允许平台表内的第二件模块（表外仍当场报错）。 |
 
+| **v2.26** | 2026-09-20 | **UI 第二轮：换成官方组件形态（状态丸 + 折叠行）**。① **状态条改一行式**：原来是多行正文塞在窄条里（顶开输入区、难扫）⇒ 现在 `[考研数学] ⚡ 今日 0/7 · 🎯 还有 N 天 · 🔥 N 分钟 · 数学一 [↻]`，明细留给 `/math` 与卡片（对标 `statusbar-config` / `lookatstudy` 的形态）。为此**契约加字段 `brief` 并升 `STATE_SCHEMA_VERSION: 1 → 2`**（本插件两半同包同批更新；客户端遇未知版本仍会**明说**而不是硬读）。② **标签用官方 `Pill`**（无 `onClick` 时渲染 `<span>`），状态条圆角 999px、底色 `--dsw-alias-bg-layer-1`。③ **卡片改用官方 `DisclosureRow`**（**受控**：`open` / `onToggle`；我们默认**展开** —— 决策人的抱怨正是"看不到东西"），头部 `icon` 是 `Pill`（✓/⏳/⚠️）+ 标题带首行摘要，正文仍由 `MarkdownText` 渲染（公式）。④ **测试 37 条**（+2：`summarizeBrief` 单行/无开局两例；另在接线测试里断言响应带单行 `brief`）。⑤ 实测（干净测试环境，端口 39192）：`{"schemaVersion":2,"ok":true,"brief":"⚡ 今日 0/7",…}`。 |
+
 ---
 
 ## 10.（v2.1 追加）模块化骨架 —— 吸收决策人 whale-moe 项目的排版章法（ADR-006）

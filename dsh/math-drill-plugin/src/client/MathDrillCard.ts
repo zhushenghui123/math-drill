@@ -16,8 +16,8 @@
  * @module @math-drill/dsh-plugin/client/card
  */
 
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import { createElement as h } from 'react'
+import { DisclosureRow, MarkdownText, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { createElement as h, useState } from 'react'
 
 /** 卡片能拿到的 props 子集（只声明我们真正读的字段，避免猜契约）。 */
 export interface MathDrillCardProps {
@@ -34,20 +34,14 @@ export interface MathDrillCardProps {
   t?: (key: string) => string
 }
 
-const BOX_STYLE = {
+const BODY_STYLE = {
   border: '0.5px solid var(--dsw-alias-border-l2)',
-  borderRadius: '8px',
-  padding: '8px 12px',
-  margin: '6px 0',
+  borderTop: '0',
+  borderRadius: '0 0 8px 8px',
+  padding: '8px 12px 10px',
+  margin: '0 0 6px',
   fontSize: '12px',
 } as const
-
-const HEAD_STYLE = {
-  display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px',
-  fontWeight: 600, letterSpacing: '0.01em',
-} as const
-
-const MARK_STYLE = { opacity: 0.85 } as const
 
 /** 卡片状态：运行中 / 成功 / 出错（官方 `ToolRowState` 的口径，这里只取我们要的三档）。 */
 export function cardState(block: MathDrillCardProps['block']): 'running' | 'ok' | 'error' {
@@ -83,13 +77,23 @@ export function MathDrillCard(props: MathDrillCardProps) {
   const fallback = state === 'running'
     ? translate('card.running', '读取中…')
     : props.block?.error?.code ?? translate('card.empty', '（没有内容）')
+  // 默认展开：决策人的抱怨就是"看不到东西"；折叠留给嫌它长的场景（官方工具卡片默认收起）
+  const [open, setOpen] = useState(true)
+  const firstLine = body.split('\n').find((line) => line.trim() !== '') ?? fallback
 
-  return h('div', { style: BOX_STYLE, 'data-math-drill': 'card' },
-    h('div', { style: HEAD_STYLE },
-      h('span', { style: MARK_STYLE }, mark),
-      h('span', null, title),
-    ),
-    // markdown + KaTeX：题面里的 \begin{vmatrix}… 由官方渲染件画出来，不再是裸 LaTeX
-    body === '' ? h('div', { style: { opacity: 0.75 } }, fallback) : h(MarkdownText, { text: body }),
+  return h('div', { 'data-math-drill': 'card' },
+    h(DisclosureRow, {
+      icon: h(Pill, { active: state === 'ok' }, mark),
+      title: `${title}${body === '' ? '' : ` · ${firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine}`}`,
+      open,
+      expandable: true,
+      onToggle: () => { setOpen((value) => !value) },
+      expandOnRowClick: true,
+      previewChevron: true,
+    },
+    h('div', { style: BODY_STYLE },
+      // markdown + KaTeX：题面里的 \begin{vmatrix}… 由官方渲染件画出来，不再是裸 LaTeX
+      body === '' ? h('div', { style: { opacity: 0.75 } }, fallback) : h(MarkdownText, { text: body }),
+    )),
   )
 }

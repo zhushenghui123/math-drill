@@ -177,6 +177,8 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
     const payload = JSON.parse(okResponse.body)
     assert.equal(payload.ok, true)
     assert.equal(payload.schemaVersion, STATE_SCHEMA_VERSION, '响应必须带契约版本（评审 §B4 正解 (a)）')
+    assert.equal(typeof payload.brief, 'string', '响应要带一行简报（状态条用）')
+    assert.equal(payload.brief.includes('\n'), false, '简报必须是一行')
     assert.match(payload.text, /三阶行列式/)
     assert.equal(payload.text.includes(QUESTION.answer), false, '答案不得进浏览器')
     assert.equal(payload.text.includes(CREDENTIAL), false, '凭据不得进浏览器')

@@ -13,7 +13,7 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createElement as h, useCallback, useEffect, useState } from 'react'
 // 相对 import ⇒ 被 tsdown 内联进产物（不是 require），与宿主半边共用同一份契约（评审 Z1 的正解）
 import { isStateResponse, STATE_PATH } from '../shared/contract.js'
@@ -91,12 +91,12 @@ const SLOT_ID = 'math-drill'
 
 /** 状态响应的形状（真源 = `src/shared/contract.js` 的版本常量）。 */
 type SummaryResponse =
-  | { schemaVersion: number; ok: true; text: string; fetchedAt: number }
+  | { schemaVersion: number; ok: true; brief: string; text: string; fetchedAt: number }
   | { schemaVersion: number; ok: false; error: string }
 
 const BOX_STYLE = {
-  display: 'flex', alignItems: 'flex-start', gap: '10px', flexWrap: 'wrap',
-  padding: '6px 12px', margin: '0 0 6px', borderRadius: '10px',
+  display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+  padding: '4px 10px', margin: '0 0 6px', borderRadius: '999px',
   background: 'var(--dsw-alias-bg-layer-1)',
   // 只引语义 token，不写颜色字面量（web-styling.zh.md:17）；这是**扁平行**不是浮层，
   // 故按 :25 用中性发丝边框，而上游 :24 的 --dsw-elevation-* 在本机 0.1.1-rc.1 **并不存在**
@@ -105,9 +105,8 @@ const BOX_STYLE = {
   fontSize: '12px', lineHeight: '1.5', opacity: 0.92,
 } as const
 
-const LABEL_STYLE = { fontWeight: 600, whiteSpace: 'nowrap', paddingTop: '1px' } as const
-/** 正文用 markdown 渲染（和卡片同一件官方渲染件）⇒ 行距/列表/公式都有正确排版。 */
-const TEXT_STYLE = { flex: '1 1 260px', minWidth: 0 } as const
+/** 一行式：简报 + 明细留给 `/math` 与卡片（对标物 statusbar / lookatstudy 同形态）。 */
+const TEXT_STYLE = { flex: '1 1 auto', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
 const BUTTON_STYLE = {
   border: '0.5px solid var(--dsw-alias-border-l2)', background: 'transparent',
   color: 'var(--dsw-alias-brand-primary)',
@@ -122,7 +121,9 @@ const BUTTON_STYLE = {
  */
 function MathDrillDock(props: unknown) {
   const [state, setState] = useState<
-    { kind: 'loading' } | { kind: 'ready'; text: string } | { kind: 'failed'; message: string }
+    | { kind: 'loading' }
+    | { kind: 'ready'; brief: string; text: string }
+    | { kind: 'failed'; message: string }
   >({ kind: 'loading' })
 
   const load = useCallback(async (): Promise<void> => {
@@ -135,7 +136,7 @@ function MathDrillDock(props: unknown) {
         return
       }
       setState(payload.ok
-        ? { kind: 'ready', text: payload.text }
+        ? { kind: 'ready', brief: payload.brief ?? payload.text.split('\n')[0], text: payload.text }
         : { kind: 'failed', message: payload.error })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -147,14 +148,11 @@ function MathDrillDock(props: unknown) {
 
   const body = state.kind === 'loading'
     ? translate(props, 'state.loading')
-    : state.kind === 'ready' ? state.text : `⚠️ ${state.message}`
+    : state.kind === 'ready' ? state.brief : `⚠️ ${state.message}`
 
   return h('div', { style: BOX_STYLE, 'data-math-drill': 'dock' },
-    h('span', { style: LABEL_STYLE }, translate(props, 'label')),
-    h('div', { style: TEXT_STYLE },
-      state.kind === 'ready'
-        ? h(MarkdownText, { text: body })
-        : h('span', null, body)),
+    h(Pill, null, translate(props, 'label')),
+    h('span', { style: TEXT_STYLE, title: state.kind === 'ready' ? state.text : undefined }, body),
     h('button', { type: 'button', style: BUTTON_STYLE, onClick: () => { void load() } },
       translate(props, 'action.refresh')),
   )
