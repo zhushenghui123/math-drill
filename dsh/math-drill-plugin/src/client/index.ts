@@ -18,6 +18,7 @@ import { createElement as h, useCallback, useEffect, useState } from 'react'
 // 相对 import ⇒ 被 tsdown 内联进产物（不是 require），与宿主半边共用同一份契约（评审 Z1 的正解）
 import { isStateResponse, STATE_PATH } from '../shared/contract.js'
 import { MathDrillCard } from './MathDrillCard.js'
+import { MathDrillWidgets } from './MathDrillWidgets.js'
 
 /**
  * 本插件需要的浏览器服务：**只有槽位**（UI 是硬依赖：没槽位就没面板）。
@@ -53,6 +54,14 @@ const DICTS = {
     'card.running': '读取中…',
     'card.empty': '（没有内容）',
     'card.truncated': '…还有更多行（展开详情可看全）',
+    'widgets.title': '考研数学 · 小组件',
+    'widgets.new': '新学',
+    'widgets.review': '复习',
+    'widgets.quiz': '小测',
+    'widgets.coverage': '考点覆盖',
+    'widgets.weak': '最该复习',
+    'widgets.noDaily': '今天还没开局 —— 去控制台点开今日题单',
+    'widgets.noTarget': '还没设考试目标 —— 让 agent 帮你设',
   },
   en: {
     'label': 'Math Drill',
@@ -65,6 +74,14 @@ const DICTS = {
     'card.running': 'Loading…',
     'card.empty': '(no content)',
     'card.truncated': '…more lines (open details for the full output)',
+    'widgets.title': 'Math Drill · widgets',
+    'widgets.new': 'New',
+    'widgets.review': 'Review',
+    'widgets.quiz': 'Quiz',
+    'widgets.coverage': 'Coverage',
+    'widgets.weak': 'Weakest',
+    'widgets.noDaily': 'No session today yet — open the console\'s daily list',
+    'widgets.noTarget': 'No exam target yet — ask the agent to set one',
   },
 } as const
 
@@ -91,7 +108,7 @@ const SLOT_ID = 'math-drill'
 
 /** 状态响应的形状（真源 = `src/shared/contract.js` 的版本常量）。 */
 type SummaryResponse =
-  | { schemaVersion: number; ok: true; brief: string; text: string; fetchedAt: number }
+  | { schemaVersion: number; ok: true; brief: string; text: string; widgets?: Record<string, unknown>; fetchedAt: number }
   | { schemaVersion: number; ok: false; error: string }
 
 const BOX_STYLE = {
@@ -122,7 +139,7 @@ const BUTTON_STYLE = {
 function MathDrillDock(props: unknown) {
   const [state, setState] = useState<
     | { kind: 'loading' }
-    | { kind: 'ready'; brief: string; text: string }
+    | { kind: 'ready'; brief: string; text: string; widgets?: Record<string, unknown> }
     | { kind: 'failed'; message: string }
   >({ kind: 'loading' })
 
@@ -136,7 +153,7 @@ function MathDrillDock(props: unknown) {
         return
       }
       setState(payload.ok
-        ? { kind: 'ready', brief: payload.brief ?? payload.text.split('\n')[0], text: payload.text }
+        ? { kind: 'ready', brief: payload.brief ?? payload.text.split('\n')[0], text: payload.text, widgets: payload.widgets }
         : { kind: 'failed', message: payload.error })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -150,11 +167,17 @@ function MathDrillDock(props: unknown) {
     ? translate(props, 'state.loading')
     : state.kind === 'ready' ? state.brief : `⚠️ ${state.message}`
 
-  return h('div', { style: BOX_STYLE, 'data-math-drill': 'dock' },
-    h(Pill, null, translate(props, 'label')),
-    h('span', { style: TEXT_STYLE, title: state.kind === 'ready' ? state.text : undefined }, body),
-    h('button', { type: 'button', style: BUTTON_STYLE, onClick: () => { void load() } },
-      translate(props, 'action.refresh')),
+  return h('div', { 'data-math-drill': 'stack' },
+    h('div', { style: BOX_STYLE, 'data-math-drill': 'dock' },
+      h(Pill, null, translate(props, 'label')),
+      h('span', { style: TEXT_STYLE, title: state.kind === 'ready' ? state.text : undefined }, body),
+      h('button', { type: 'button', style: BUTTON_STYLE, onClick: () => { void load() } },
+        translate(props, 'action.refresh')),
+    ),
+    // 小组件面板：只在拿到数据时出现（失败/加载中不骗人）
+    state.kind === 'ready' && state.widgets !== undefined
+      ? h(MathDrillWidgets, { ...state.widgets, t: (key: string) => translate(props, key as never) })
+      : null,
   )
 }
 

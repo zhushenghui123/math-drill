@@ -152,8 +152,8 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
   it('apply() 注册两个只读工具 + 一条只读摘要路由，并各挂一个 disposer', async () => {
     const ctx = fakeContext()
     await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'missing') })
-    assert.deepEqual(registeredVia(ctx.toolCalls).map((tool) => tool.name), ['math_drill_progress', 'math_drill_today'])
-    assert.equal(ctx.effects.length, 4, '两个工具 + 路由 + 命令 各一个 effect（卸载即注销）')
+    assert.deepEqual(registeredVia(ctx.toolCalls).map((tool) => tool.name), ['math_drill_progress', 'math_drill_today', 'math_drill_review'])
+    assert.equal(ctx.effects.length, 5, '三个工具 + 路由 + 命令 各一个 effect（卸载即注销）')
     assert.deepEqual(registeredVia(ctx.commandCalls).map((command) => command.name), ['math'])
     assert.deepEqual(registeredVia(ctx.serverCalls).map((route) => [route.kind, route.path]), [['exact', STATE_PATH]])
     for (const tool of registeredVia(ctx.toolCalls)) {
@@ -283,7 +283,7 @@ describe('/math 斜杠命令（C4）', () => {
     const ctx = fakeContext()
     ctx.get = () => undefined                       // 模拟没有 commands 的宿主
     await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'x') })
-    assert.equal(registeredVia(ctx.toolCalls).length, 2, '工具必须照常注册')
+    assert.equal(registeredVia(ctx.toolCalls).length, 3, '工具必须照常注册')
     assert.equal(registeredVia(ctx.serverCalls).length, 1, '路由必须照常注册')
     assert.equal(registeredVia(ctx.commandCalls).length, 0, '没有服务就不注册命令')
   })

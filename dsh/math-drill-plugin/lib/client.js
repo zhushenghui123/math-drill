@@ -32,7 +32,7 @@ window.__ModuleLoader__.load({
 		function isStateResponse(payload) {
 			if (payload === null || typeof payload !== "object") return false;
 			const candidate = payload;
-			if (candidate.schemaVersion !== 2) return false;
+			if (candidate.schemaVersion !== 3) return false;
 			return typeof candidate.ok === "boolean";
 		}
 		//#endregion
@@ -99,6 +99,95 @@ window.__ModuleLoader__.load({
 			}, (0, react.createElement)("div", { style: BODY_STYLE }, body === "" ? (0, react.createElement)("div", { style: { opacity: .75 } }, fallback) : (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.MarkdownText, { text: body }))));
 		}
 		//#endregion
+		//#region src/client/MathDrillWidgets.ts
+		/**
+		* 状态条下方的**小组件面板**（决策人定调：DSH 只做"数据桥 + 几个小组件"，不做题目展示面）。
+		*
+		* 渲染件全部来自平台表内模块（`ui-primitives` 的 `DisclosureRow` / `Pill` / `MarkdownText`）；
+		* 样式只用语义 token（`--dsw-alias-*`），不写颜色字面量（`docs/web-styling`）。
+		*
+		* 每个组件都对应 `summarizeWidgets()` 的一个字段（真源在宿主侧，客户端不自己算）。
+		*
+		* @module @math-drill/dsh-plugin/client/widgets
+		*/
+		const PANEL = {
+			border: "0.5px solid var(--dsw-alias-border-l2)",
+			borderTop: "0",
+			borderRadius: "0 0 10px 10px",
+			padding: "8px 12px 10px",
+			margin: "0 0 6px",
+			fontSize: "12px",
+			display: "grid",
+			gap: "8px"
+		};
+		const ROW = {
+			display: "flex",
+			alignItems: "center",
+			gap: "8px",
+			flexWrap: "wrap"
+		};
+		const MUTED = { opacity: .75 };
+		/** 一条细进度条（宽度按 done/total，用 token 色）。 */
+		function bar(done, total) {
+			return (0, react.createElement)("span", { style: {
+				display: "inline-block",
+				width: "72px",
+				height: "6px",
+				borderRadius: "999px",
+				background: "var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1))",
+				overflow: "hidden"
+			} }, (0, react.createElement)("span", { style: {
+				display: "block",
+				width: `${total === 0 ? 0 : Math.round(done / total * 100)}%`,
+				height: "100%",
+				background: "var(--dsw-alias-brand-primary)"
+			} }));
+		}
+		/**
+		* 渲染小组件面板。
+		*
+		* @param props - `widgets`（宿主算好的数据）+ `t`（文案座位，可选）。
+		* @returns React 元素。
+		*/
+		function MathDrillWidgets(props) {
+			const [open, setOpen] = (0, react.useState)(true);
+			const w = props;
+			const tr = (key, fallback) => typeof props.t === "function" ? props.t(key) : fallback;
+			const today = w.today;
+			const cov = w.coverage;
+			const game = w.game;
+			return (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.DisclosureRow, {
+				icon: (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.Pill, { active: false }, "📊"),
+				title: tr("widgets.title", "考研数学 · 小组件"),
+				open,
+				expandable: true,
+				onToggle: () => {
+					setOpen((v) => !v);
+				},
+				expandOnRowClick: true
+			}, (0, react.createElement)("div", { style: PANEL }, today === null || today === void 0 ? (0, react.createElement)("div", { style: MUTED }, tr("widgets.noDaily", "今天还没开局 —— 去控制台点开今日题单")) : (0, react.createElement)("div", { style: ROW }, ...[
+				"new",
+				"review",
+				"quiz"
+			].map((key) => {
+				const slot = today[key] ?? {
+					done: 0,
+					total: 0
+				};
+				return (0, react.createElement)("span", {
+					key,
+					style: ROW
+				}, (0, react.createElement)("span", { style: MUTED }, tr(`widgets.${key}`, {
+					new: "新学",
+					review: "复习",
+					quiz: "小测"
+				}[key])), bar(slot.done, slot.total), (0, react.createElement)("span", null, `${slot.done}/${slot.total}`));
+			})), cov === void 0 ? null : (0, react.createElement)("div", { style: ROW }, (0, react.createElement)("span", { style: MUTED }, tr("widgets.coverage", "考点覆盖")), bar(cov.covered, cov.total), (0, react.createElement)("span", null, `${cov.covered}/${cov.total}`)), (w.weak ?? []).length === 0 ? null : (0, react.createElement)("div", { style: ROW }, (0, react.createElement)("span", { style: MUTED }, tr("widgets.weak", "最该复习")), ...(w.weak ?? []).map((row) => (0, react.createElement)("span", {
+				key: row.kid,
+				style: ROW
+			}, (0, react.createElement)("span", null, row.title), (0, react.createElement)("span", { style: MUTED }, `错 ${row.wrong}/${row.n}`), (0, react.createElement)("span", { style: MUTED }, `${row.accuracy === null ? "—" : Math.round(row.accuracy * 100) + "%"}`)))), game === void 0 ? null : (0, react.createElement)("div", { style: ROW }, (0, react.createElement)("span", null, `🔥 ${game.streak} 天`), (0, react.createElement)("span", { style: MUTED }, `⏱ 今天 ${game.minutesToday} 分钟`), (0, react.createElement)("span", null, `🏆 ${game.achievements}`), (0, react.createElement)("span", { style: MUTED }, `⚡ 最高连击 ${game.bestCombo}`)), (0, react.createElement)("div", { style: ROW }, w.target === null || w.target === void 0 ? (0, react.createElement)("span", { style: MUTED }, tr("widgets.noTarget", "还没设考试目标 —— 让 agent 帮你设（说一句\"我 12 月考，目标是数学一\"）")) : (0, react.createElement)("span", null, `🎯 ${w.target.examDate}${w.target.daysLeft === null ? "" : ` · 还有 ${w.target.daysLeft} 天`}${w.target.track === null ? "" : ` · ${w.target.track}`}${w.target.dailyNew === null ? "" : ` · 建议每日 ${w.target.dailyNew} 题`}`))));
+		}
+		//#endregion
 		//#region src/client/index.ts
 		/**
 		* 本插件需要的浏览器服务：**只有槽位**（UI 是硬依赖：没槽位就没面板）。
@@ -131,7 +220,15 @@ window.__ModuleLoader__.load({
 				"card.progress": "考研数学 · 进度",
 				"card.running": "读取中…",
 				"card.empty": "（没有内容）",
-				"card.truncated": "…还有更多行（展开详情可看全）"
+				"card.truncated": "…还有更多行（展开详情可看全）",
+				"widgets.title": "考研数学 · 小组件",
+				"widgets.new": "新学",
+				"widgets.review": "复习",
+				"widgets.quiz": "小测",
+				"widgets.coverage": "考点覆盖",
+				"widgets.weak": "最该复习",
+				"widgets.noDaily": "今天还没开局 —— 去控制台点开今日题单",
+				"widgets.noTarget": "还没设考试目标 —— 让 agent 帮你设"
 			},
 			en: {
 				"label": "Math Drill",
@@ -143,7 +240,15 @@ window.__ModuleLoader__.load({
 				"card.progress": "Math Drill · progress",
 				"card.running": "Loading…",
 				"card.empty": "(no content)",
-				"card.truncated": "…more lines (open details for the full output)"
+				"card.truncated": "…more lines (open details for the full output)",
+				"widgets.title": "Math Drill · widgets",
+				"widgets.new": "New",
+				"widgets.review": "Review",
+				"widgets.quiz": "Quiz",
+				"widgets.coverage": "Coverage",
+				"widgets.weak": "Weakest",
+				"widgets.noDaily": "No session today yet — open the console's daily list",
+				"widgets.noTarget": "No exam target yet — ask the agent to set one"
 			}
 		};
 		/** 注册卡片的工具名（keyed 分发值 = wire 工具名；改这里必须同步 `src/tools.js` 的工具名）。 */
@@ -215,7 +320,8 @@ window.__ModuleLoader__.load({
 					setState(payload.ok ? {
 						kind: "ready",
 						brief: payload.brief ?? payload.text.split("\n")[0],
-						text: payload.text
+						text: payload.text,
+						widgets: payload.widgets
 					} : {
 						kind: "failed",
 						message: payload.error
@@ -232,7 +338,7 @@ window.__ModuleLoader__.load({
 				load();
 			}, [load]);
 			const body = state.kind === "loading" ? translate(props, "state.loading") : state.kind === "ready" ? state.brief : `⚠️ ${state.message}`;
-			return (0, react.createElement)("div", {
+			return (0, react.createElement)("div", { "data-math-drill": "stack" }, (0, react.createElement)("div", {
 				style: BOX_STYLE,
 				"data-math-drill": "dock"
 			}, (0, react.createElement)(_deepseek_ai_dsh_client_ui_primitives.Pill, null, translate(props, "label")), (0, react.createElement)("span", {
@@ -244,7 +350,10 @@ window.__ModuleLoader__.load({
 				onClick: () => {
 					load();
 				}
-			}, translate(props, "action.refresh")));
+			}, translate(props, "action.refresh"))), state.kind === "ready" && state.widgets !== void 0 ? (0, react.createElement)(MathDrillWidgets, {
+				...state.widgets,
+				t: (key) => translate(props, key)
+			}) : null);
 		}
 		/**
 		* 挂载客户端半边：往 `conversation.input.dock` 追加一条。

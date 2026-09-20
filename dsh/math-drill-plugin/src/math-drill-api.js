@@ -69,6 +69,10 @@ export function createMathDrillClient({ baseUrl, credential, timeoutMs = 10_000,
   return {
     /** `GET /api/state` —— 服务器持有的 blob（进度/设置/打卡）。 */
     state: () => getJson('/api/state'),
+    /** `GET /api/kp` —— 知识点目录（把 kid 翻译成人话；ADR-016 决策 1）。 */
+    kp: () => getJson('/api/kp'),
+    /** `GET /api/attempts` —— 做题记录聚合（复盘用；只回判定/题号/考点，`day` 桶）。 */
+    attempts: (days = 30) => getJson(`/api/attempts?days=${days}`),
     /** `GET /api/daily` —— 服务端当天题单（工具层会剥掉答案）。 */
     daily: () => getJson('/api/daily'),
   }

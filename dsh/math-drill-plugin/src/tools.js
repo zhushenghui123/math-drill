@@ -13,10 +13,10 @@
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { summarizeDaily, summarizeProgress } from './summarize.js'
+import { summarizeDaily, summarizeProgress, summarizeReview } from './summarize.js'
 
 /** 本插件注册的工具名（顺序即呈现顺序）。 */
-export const MATH_DRILL_TOOL_NAMES = ['math_drill_progress', 'math_drill_today']
+export const MATH_DRILL_TOOL_NAMES = ['math_drill_progress', 'math_drill_today', 'math_drill_review']
 
 /** 统一文本输出契约（沿用 bridge-browser 同款：一个 `{ text }` 对象 = 一个文本块）。 */
 const TEXT_OUTPUT = {
@@ -63,5 +63,22 @@ export function createMathDrillTools({ client }) {
     presentCall: () => ({ title: '读取今日题单', kind: 'read' }),
   })
 
-  return [progress, today]
+  const review = defineTool({
+    name: 'math_drill_review',
+    description:
+      '复盘考研数学最近一段时间的做题表现：题数/对错/正确率、**最该复习的考点**（用知识点目录把 kid 翻成人话）、'
+      + '最近的错题清单（日期 + 考点 + 题号）。**不回题面与答案** —— 看题/改错/判分都在研数控制台。',
+    parameters: {
+      days: { type: 'number', description: '回看天数（默认 30，1–365）。' },
+    },
+    output: TEXT_OUTPUT,
+    async execute(args) {
+      const days = Math.max(1, Math.min(365, Number(args?.days ?? 30) || 30))
+      const [attempts, kp] = await Promise.all([client.attempts(days), client.kp()])
+      return { text: summarizeReview(attempts, kp) }
+    },
+    presentCall: () => ({ title: '复盘考研数学', kind: 'read' }),
+  })
+
+  return [progress, today, review]
 }

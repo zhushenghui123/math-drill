@@ -180,7 +180,7 @@ describe('只读客户端（ADR-015 决策 5）', () => {
   })
 
   it('客户端**没有**写方法（红线：起步期不碰写面）', () => {
-    assert.deepEqual(Object.keys(client()).sort(), ['daily', 'state'])
+    assert.deepEqual(Object.keys(client()).sort(), ['attempts', 'daily', 'kp', 'state'])
   })
 
   it('401/非 200 都映射成 MathDrillError，且消息里没有凭据', async () => {

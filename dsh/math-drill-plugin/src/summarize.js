@@ -149,3 +149,105 @@ export function summarizeDaily(payload) {
     '（**题面与答案都不在本输出内**：看题、做题、判分都在研数控制台；这里只提供"该练什么"的数据。）',
   ].join('\n')
 }
+
+/**
+ * `/api/attempts` + `/api/kp` → 复盘文本（agent 用；**不含题面与答案**）。
+ *
+ * 为什么要 kp：`attempts` 里只有 `kid`（`l1n1` 这种）——没有目录，agent 只能说
+ * "你在 l1n1 上错得多"，说不出人话（评审第四轮：kp 是 attempts 的**依赖**，不是偏好）。
+ *
+ * @param {Record<string, any>} attempts - `/api/attempts` 的响应。
+ * @param {Record<string, any>} kp - `/api/kp` 的响应。
+ * @returns {string} 给模型看的短文本。
+ */
+export function summarizeReview(attempts, kp) {
+  const titles = new Map((kp?.items ?? []).map((item) => [String(item.id), String(item.title ?? item.id)]))
+  const totals = attempts?.totals ?? {}
+  const days = attempts?.window?.days ?? '?'
+  if (!totals.n) return `近 ${days} 天没有做题记录（或者还没点开学控制台）。`
+  const lines = [
+    `近 ${days} 天：做 ${totals.n} 题，对 ${totals.correct}、错 ${totals.wrong}`
+    + `（正确率 ${totals.accuracy === null || totals.accuracy === undefined ? '—' : Math.round(totals.accuracy * 100) + '%'}）`,
+  ]
+  const weak = (attempts.byKid ?? []).filter((row) => row.wrong > 0).slice(0, 3)
+  if (weak.length > 0) {
+    lines.push('最该复习的考点：' + weak.map((row) =>
+      `${titles.get(String(row.kid)) ?? row.kid}（错 ${row.wrong}/${row.n}）`).join('、'))
+  }
+  const recentWrong = (attempts.recent ?? []).filter((row) => row.correct === false).slice(-5)
+  if (recentWrong.length > 0) {
+    lines.push('最近的错题：' + recentWrong.map((row) =>
+      `${row.day} ${titles.get(String(row.kid)) ?? row.kid} [${row.qid}]`).join('；'))
+  }
+  lines.push('（题面与答案不在本输出内：看题、改错、判分都在研数控制台；这里只给"该补哪儿"的线索。）')
+  return lines.join('\n')
+}
+
+/**
+ * 状态条下方那组**小组件**的数据面（一次算好，客户端只管画）。
+ *
+ * 依据决策人 2026-09-20 的定调：**DSH 不是题目的第二展示面**，插件只做"数据桥 + 几个小组件"。
+ * 每个字段都对应一个能一眼看懂的小组件，且**全部来自只读数据**（blob + /api/attempts + /api/kp）。
+ *
+ * @param {Record<string, any>} state - `/api/state` 的响应。
+ * @param {Record<string, any>} attempts - `/api/attempts` 的响应。
+ * @param {Record<string, any>} kp - `/api/kp` 的响应。
+ * @param {Date} [now] - 注入"今天"。
+ * @returns {Record<string, any>} 见下面各字段的注释。
+ */
+export function summarizeWidgets(state, attempts, kp, now = new Date()) {
+  const data = state?.data ?? {}
+  const daily = data.daily ?? null
+  const settings = data.settings ?? {}
+  const game = data.game ?? {}
+  const checkins = data.checkins ?? {}
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const span = (ids, done) => ({ done: countOf(done), total: countOf(ids) })
+  const titles = new Map((kp?.items ?? []).map((i) => [String(i.id), String(i.title ?? i.id)]))
+
+  // ① 今日三栏（新学 / 复习 / 小测）
+  const todayWidget = daily
+    ? { new: span(daily.newIds, daily.newDoneIds), review: span(daily.reviewIds, daily.reviewDoneIds), quiz: span(daily.quizIds, daily.quizDoneIds) }
+    : null
+
+  // ② 弱项考点 Top3（用知识点目录把 kid 翻成人话）
+  const weak = (attempts?.byKid ?? [])
+    .filter((row) => row.wrong > 0)
+    .slice(0, 3)
+    .map((row) => ({
+      kid: row.kid, title: titles.get(String(row.kid)) ?? String(row.kid),
+      n: row.n, wrong: row.wrong, accuracy: row.accuracy,
+    }))
+
+  // ③ 考点覆盖（练过几个 / 共几个）
+  const covered = new Set((attempts?.byKid ?? []).map((row) => String(row.kid))).size
+  const coverage = { covered, total: (kp?.items ?? []).length }
+
+  // ④ 连续打卡 + 游戏化（研数自己有 gamifier 模块，这里只读它的状态）
+  const streak = (() => {
+    let n = 0
+    const cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    for (;;) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`
+      if (checkins[key] === undefined) break
+      n += 1
+      cursor.setDate(cursor.getDate() - 1)
+    }
+    return n
+  })()
+  const gameWidget = {
+    streak,
+    minutesToday: checkins[today]?.minutes ?? 0,
+    combo: Number(game.combo ?? 0),
+    bestCombo: Number(game.bestCombo ?? 0),
+    achievements: Object.keys(game.achievements ?? {}).length,
+  }
+
+  // ⑤ 目标倒计时（settings 为空时显式给 null —— 客户端据此显示"让 agent 帮你设"）
+  const daysLeft = settings.examDate ? daysUntil(settings.examDate, now) : null
+  const target = settings.examDate
+    ? { examDate: settings.examDate, daysLeft, track: TRACK_NAMES[settings.examTrack] ?? null, dailyNew: settings.dailyNew ?? null }
+    : null
+
+  return { today: todayWidget, weak, coverage, game: gameWidget, target }
+}

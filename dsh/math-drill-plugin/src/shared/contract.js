@@ -23,7 +23,7 @@ export const STATE_PATH = '/math-drill/summary'
  * 改一边忘了另一边就是运行时静默错位；带上版本号，客户端能显式判"这是不是我认识的形状"。
  * 规则：**只增不改** —— 加字段升 1（v2：加 `brief` 一行简报，给状态条用）；删字段/改语义才动大版本。
  */
-export const STATE_SCHEMA_VERSION = 2
+export const STATE_SCHEMA_VERSION = 3
 
 /**
  * 判定一个响应是不是本客户端认识的形状。
