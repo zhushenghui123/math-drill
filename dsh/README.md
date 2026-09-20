@@ -9,6 +9,7 @@
 ```
 dsh/
 ├── README.md                      # 本文件
+├── 参考-官方文档与生态.md          # ★ 官方 Skill/文档 + 社区对标物 + 逐条对照我们的实现（2026-09-20 调研）
 └── math-drill-plugin/             # 桥接插件（宿主半边，Phase A）
     ├── package.json               # dsh.bundle.patch 声明 ⇒ `dsh plugin add` 会自动挂进 profile 的 bundles
     ├── cordis.patch.yml           # bundle 补丁：往组合树里 insert 一行（含 config）
@@ -22,6 +23,10 @@ dsh/
 ```
 
 ## 安装（本机 DSH）
+
+> **开发环 vs 交付**：迭代时用 `dsh web --patch dsh/math-drill-plugin/cordis.patch.yml`（官方推荐的 overlay 方式，
+> 不必先装进 profile，改完重启即可）；`dsh plugin add` 是**交付**动作。
+> **任何插件改动都要重启 `dsh web` 才生效**——加载器图在进程启动时冻结。
 
 ```bash
 # 1) 把插件的宿主依赖链到本机 DSH（必须；见下方"为什么必须"）

@@ -35,8 +35,8 @@
   },
   "license": "MIT",
   "files": [
+    "lib",
     "src",
-    "tests",
     "cordis.patch.yml",
     "README.md"
   ]
