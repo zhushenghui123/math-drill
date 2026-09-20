@@ -241,7 +241,7 @@ def check_c1(repo: Path, docs: Path) -> list[str]:
 #     ⚠️ **代价**：段级会连该段今后任何 live 声明一起静默 ⇒ 排除段只认现成的 heading 标记，
 #     **新增 live 声明不得写进这些段**（否则护栏对它视而不见）。
 #   · **"四处"是必检项，不是扫描边界**：把它当边界会让排除表空转、并让检查器看不见第五处。
-ENDPOINT_SET_EXPECTED = ("/api/daily", "/api/judge", "/api/state")
+ENDPOINT_SET_EXPECTED = ("/api/attempts", "/api/daily", "/api/judge", "/api/kp", "/api/state")
 # 已知**非**运行时端点（实测首跑就抓到这一条）：白名单必须带理由，否则它会变成第二个"学会无视"。
 NON_ENDPOINT_ALLOWLIST = {
     "/api/questions": "离线打包路径，非运行时端点（docs/ARCHITECTURE.md:454 的括注已写明）",

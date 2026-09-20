@@ -312,6 +312,17 @@ class Store:
             self.conn.commit()
             return n
 
+    def list_kp(self) -> list[dict]:
+        """知识点目录（只读端点 `/api/kp` 的数据源；表小，一次给全）。
+
+        为什么需要它：`attempts`/`/api/daily` 里只有 `kid`（如 `l1n1`），
+        没有这张目录，agent 只能说"你在 l1n1 上错得多"，说不出人话。
+        """
+        with self._lock:
+            return [dict(r) for r in self.conn.execute(
+                "SELECT id, title, chapter, subject, exam, related FROM kp ORDER BY id"
+            ).fetchall()]
+
     def kp_count(self) -> int:
         with self._lock:
             return int(self.conn.execute("SELECT COUNT(*) AS c FROM kp").fetchone()["c"])

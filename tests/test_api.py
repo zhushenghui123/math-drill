@@ -367,3 +367,43 @@ class CookieDerivationCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class AgentReadSurfaceCase(APITestCase):
+    """ADR-016：只读端点 + 服务端分层剥答案（agent 拿不到 answer/analysis）。"""
+
+    def test_30_kp_readonly(self) -> None:
+        status, body, _ = _req(self.url("/api/kp"), bearer=self.bearer)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["schemaVersion"], 1)
+        self.assertIsInstance(body["items"], list)
+
+    def test_31_attempts_aggregate_no_stem_no_seconds(self) -> None:
+        _req(self.url("/api/judge"), method="POST",
+             body={"qid": QUESTION["id"], "raw_answer": "-3"}, cookie=self.cookie)
+        status, body, _ = _req(self.url("/api/attempts?days=7&limit=10"), bearer=self.bearer)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["totals"]["n"], 1)
+        self.assertEqual(body["totals"]["correct"], 1)
+        self.assertEqual(body["window"]["days"], 7)
+        row = body["recent"][0]
+        self.assertEqual(row["qid"], QUESTION["id"])
+        self.assertIn("day", row, "时间必须降到天")
+        self.assertNotIn("ts", row, "不给秒级时间戳（否则能还原作息）")
+        blob = json.dumps(body, ensure_ascii=False)
+        self.assertNotIn(QUESTION["answer"], blob)
+        self.assertNotIn("analysis", blob)
+
+    def test_32_agent_gets_no_answer_from_daily(self) -> None:
+        status, agent_body, _ = _req(self.url("/api/daily"), bearer=self.bearer)
+        self.assertEqual(status, 200)
+        self.assertEqual(agent_body["questions"][0].get("answer"), None,
+                         "agent 身份不得拿到 answer（服务端分层，ADR-016 决策 4）")
+        status, browser_body, _ = _req(self.url("/api/daily"), cookie=self.cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(browser_body["questions"][0]["answer"], QUESTION["answer"],
+                         "浏览器仍要拿到答案（控制台判分依赖它）")
+
+    def test_33_attempts_rejects_bad_params(self) -> None:
+        status, body, _ = _req(self.url("/api/attempts?days=abc"), bearer=self.bearer)
+        self.assertEqual(status, 400, body)

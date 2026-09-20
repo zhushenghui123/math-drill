@@ -451,8 +451,8 @@ math-drill/
 ### 11.5 路由权威与权限门的落位（质检官 S2 定案）
 
 - **HTTP 面唯一持有者 = `bridge/api.py`**，且**它就是进程入口**（`python3 -m bridge.api`）。对齐决策人 whale-moe 的 `bridge/control_api.py` 章（一台轻服务器 = 静态资源 + JSON API）。**原 v2.2 的 `core/server.py` 已从树中删除**——它会造成 `core→bridge` 违规边（ADR-010）。`core/registry.py` 仍是被 bridge 调用的装载器。
-- **MANIFEST 不再声明 routes**（撤回 v2.1 §10.C#2 的「注册路由」表述），模块只声明回调 `rpc[]`（函数名清单）；bridge 统一以 **`/m/<module>/<rpc>`** 挂载；**bridge 自有端点恰好三个**：`/api/state`、`/api/judge`、`/api/daily`（⚠️ 原「固定四个」为笔误；§1 图中的 `/api/questions` 是**离线打包路径**，非运行时端点——已修正）。
-- **引导端点 `/setup` 是唯一不过凭据门的入口**（v2.7 补，回应复核 B2；**v2.15 措辞对齐**：门里现在有两种凭据）：它就是「换取凭证」的入口，若也过门则永远拿不到 cookie（部署死锁）。它只受 §13.3 的独立限速，不参与统一过滤器；上一句的「恰好三个」专指 `/api/*` 自有端点，**不含 `/setup`**。
+- **MANIFEST 不再声明 routes**（撤回 v2.1 §10.C#2 的「注册路由」表述），模块只声明回调 `rpc[]`（函数名清单）；bridge 统一以 **`/m/<module>/<rpc>`** 挂载；**bridge 自有端点恰好五个**：`/api/state`、`/api/judge`、`/api/daily`、**`/api/kp`**、**`/api/attempts`**（⚠️ 原「固定四个」为笔误；§1 图中的 `/api/questions` 是**离线打包路径**，非运行时端点——已修正）。
+- **引导端点 `/setup` 是唯一不过凭据门的入口**（v2.7 补，回应复核 B2；**v2.15 措辞对齐**：门里现在有两种凭据）：它就是「换取凭证」的入口，若也过门则永远拿不到 cookie（部署死锁）。它只受 §13.3 的独立限速，不参与统一过滤器；上一句的「恰好五个」专指 `/api/*` 自有端点，**不含 `/setup`**。
 - **安全后果（质检官警告的正解）**：全部 `/m/*` 与 `/api/*` 经 **bridge 单点凭据门 + rate-limit**（凭据 = 浏览器会话 cookie **或** 服务间 Bearer，二者互不可替代；**加鉴权路径不加端点**，见 ADR-015 决策 3）——test_api.py 现在可以写了（单一过滤器；**唯一例外见上一条**）。
 
 ### 11.6 文档卫生定案（S3 中三条 + 一行级全收）
@@ -711,7 +711,7 @@ tau_days = 10                     # 回应复核 M/D5：τ 的落点在此，非
 | `web/index.html` | 入口页 | `GET /` → 该文件 |
 | `web/js/**`、`web/assets/**` | 前端资源 | 直接映射（`/js/...`、`/assets/...`） |
 | `web/tests/**` | node 测试 | ⛔ **禁止对外暴露**（403）；同时对任何 dotfile 一律 403 |
-| `/api/state`、`/api/judge`、`/api/daily` | bridge 自有端点（三个） | 经**凭据门**（浏览器 cookie **或** 服务间 Bearer）+ 限速（桶键按身份，见 §13.1 注①） |
+| `/api/state`、`/api/judge`、`/api/daily`、`/api/kp`、`/api/attempts` | bridge 自有端点（五个；只读两个见 ADR-016） | 经**凭据门**（浏览器 cookie **或** 服务间 Bearer）+ 限速（桶键按身份，见 §13.1 注①） |
 | `/m/<module>/<rpc>` | 模块 RPC（bridge 统一挂载） | 同上，无例外面 |
 | `/setup` | 一次性凭据入口 | ⚠️ **不过 token 门**（唯一例外——它就是换取凭证的入口）；见 §13.3，**独立限速** |
 
