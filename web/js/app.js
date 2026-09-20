@@ -624,6 +624,9 @@
     $$('.nav-item').forEach(function (a) { a.classList.remove('active'); });
     var map = { '': '/', learn: '/learn', quiz: '/quiz', review: '/review', mistakes: '/mistakes', stats: '/stats', settings: '/settings', cards: '/cards', achievements: '/achievements', boss: '/learn' };
     var target = map[seg];
+    // 题库栏目（/s/<学科>）与题目详情（/q/<题号>）的"哪一项高亮"由 qbank.js 决定
+    // ——它才知道这道题属于哪个学科；这里直接放手，别先把"仪表盘"点亮又改回去。
+    if (seg === 's' || seg === 'q') return;
     if (!target) target = seg === 'learn' ? '/learn' : '/';
     $$('.nav-item').forEach(function (a) {
       if (a.getAttribute('data-route') === target) a.classList.add('active');
@@ -2916,6 +2919,11 @@
     if (m) { window.__curKid = m[1]; return pageClass(m[1]); }
     m = h.match(/^\/cards\/(.+)$/);
     if (m) { window.__curKid = m[1]; return pageCards(m[1]); }
+    // 题库浏览（ADR-017）：/s/<学科> 栏目页 · /q/<题号> 详情页
+    m = h.match(/^\/s\/(.+)$/);
+    if (m && window.MDQbank) return window.MDQbank.pageSubject(decodeURIComponent(m[1]));
+    m = h.match(/^\/q\/(.+)$/);
+    if (m && window.MDQbank) return window.MDQbank.pageQuestion(decodeURIComponent(m[1]));
     if (h === '/cards') { window.__curKid = null; return pageCards(null); }
     if (h === '/achievements') return pageAchievements();
     m = h.match(/^\/boss\/(.+)$/);
@@ -2946,6 +2954,9 @@
 
   /* ----- 启动 ----- */
   window.App = App;
+  /* 题库浏览（ADR-017）借用本文件的转义 / 公式 / 页头 —— 只开这一扇窄窗：
+     MDShell 只有四个成员，不把内部函数铺成全局。 */
+  window.MDShell = { esc: esc, md: md, head: head, toast: toast };
 
   /* 卡片样式只有一份来源（cards.js 的 CARD_CSS）：屏幕上看到的、打印出来的、
      下载的独立 HTML —— 三处共用。启动时同步注入，不会闪。 */
@@ -2986,6 +2997,8 @@
       toast('题库未加载：' + ((e && e.message) || e) + '（先访问 /setup?t=<token> 拿登录凭据）', 'no');
     });
   }
+  // 题库栏目的侧栏入口（ADR-017）：拉不到就静默隐藏，绝不挡主流程
+  if (window.MDQbank && window.MDQbank.loadSubjects) window.MDQbank.loadSubjects();
   mergeCustomQ();
   window.addEventListener('hashchange', route);
   window.addEventListener('load', route);

@@ -54,6 +54,17 @@ html[data-layout="mobile"] .nav-item {
 html[data-layout="mobile"] .nav-item .ic { width: 20px; height: 20px; }
 html[data-layout="mobile"] .nav-item .badge { top: 2px; right: 6px; }
 
+/* 题库栏目（ADR-017）：底栏里不显示分组标题，栏目项与其它标签同形。
+   `display: contents` 让子项直接参与 #nav 的横向排布 —— 否则整组会被当成"一个标签"挤成一列。
+   ⚠️ 它同时会盖掉 [hidden] 的 UA 样式，所以下面必须显式补一条 none。 */
+html[data-layout="mobile"] #nav-subjects { display: contents; }
+html[data-layout="mobile"] #nav-subjects[hidden] { display: none; }
+html[data-layout="mobile"] .nav-group-title { display: none; }
+html[data-layout="mobile"] .nav-item .nav-dot { display: none; }
+html[data-layout="mobile"] .nav-item .nav-count { position: absolute; top: 2px; right: 6px; margin: 0; font-size: 10px; }
+html[data-layout="mobile"] .qb-widgets { grid-template-columns: repeat(2, 1fr); }
+html[data-layout="mobile"] .qb-grid { grid-template-columns: 1fr; }
+
 /* 底栏里只留"同步状态"与"界面切换"：等级/连击/贴士是电脑端侧栏的装饰 */
 html[data-layout="mobile"] .side-foot {
   display: flex; flex-direction: row; align-items: center;

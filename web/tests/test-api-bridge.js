@@ -141,6 +141,34 @@ console.log('\n=== web/js/api.js 存储桥 ===');
     ok('未登录时 loadQuestions() 抛错（交给 UI 提示去 /setup）', !!threw && threw.code === 'unauthorized');
   }
 
+  // ⑧ 题库浏览（ADR-017）：走模块路由 /m/qbank/*，**不是新端点**；筛选参数拼进查询串
+  {
+    const { win, calls } = makeEnv();
+    win.__responses.push({ status: 200, body: { subjects: [], items: [], counts: {} } });
+    await win.MDStore.qbankList({ subject: 'linear', kid: 'l1n1', done: false, limit: 80 });
+    ok('qbankList() 打到 /m/qbank/list',
+       calls[0].url === '/m/qbank/list?subject=linear&kid=l1n1&done=false&limit=80',
+       calls[0].url);
+    ok('qbankList() 用 GET', calls[0].opt.method === 'GET');
+    ok('done=false 传的是字符串 "false"（服务端按字符串解析，不吃 bool("false") 这个坑）',
+       /done=false/.test(calls[0].url));
+  }
+  {
+    const { win, calls } = makeEnv();
+    win.__responses.push({ status: 200, body: { question: { qid: 'q1' } } });
+    await win.MDStore.qbankDetail('imp.tjq1.s1-6.q1-3');
+    ok('qbankDetail() 打到 /m/qbank/detail?qid=…',
+       calls[0].url === '/m/qbank/detail?qid=imp.tjq1.s1-6.q1-3', calls[0].url);
+  }
+  {
+    const { win } = makeEnv();
+    win.__responses.push({ status: 404, body: { error: 'no_such_rpc', message: '未知题目' } });
+    let threw = null;
+    try { await win.MDStore.qbankDetail('nope'); } catch (e) { threw = e; }
+    ok('qbank 失败时抛带 code 的 Error（调用方只认这一种形状）',
+       !!threw && threw.code === 'no_such_rpc' && threw.status === 404);
+  }
+
   console.log('');
   if (fail) {
     console.log('❌ 有失败：' + (pass + fail) + ' 项，失败 ' + fail);

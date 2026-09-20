@@ -293,6 +293,7 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 | **v2.26** | 2026-09-20 | **UI 第二轮：换成官方组件形态（状态丸 + 折叠行）**。① **状态条改一行式**：原来是多行正文塞在窄条里（顶开输入区、难扫）⇒ 现在 `[考研数学] ⚡ 今日 0/7 · 🎯 还有 N 天 · 🔥 N 分钟 · 数学一 [↻]`，明细留给 `/math` 与卡片（对标 `statusbar-config` / `lookatstudy` 的形态）。为此**契约加字段 `brief` 并升 `STATE_SCHEMA_VERSION: 1 → 2`**（本插件两半同包同批更新；客户端遇未知版本仍会**明说**而不是硬读）。② **标签用官方 `Pill`**（无 `onClick` 时渲染 `<span>`），状态条圆角 999px、底色 `--dsw-alias-bg-layer-1`。③ **卡片改用官方 `DisclosureRow`**（**受控**：`open` / `onToggle`；我们默认**展开** —— 决策人的抱怨正是"看不到东西"），头部 `icon` 是 `Pill`（✓/⏳/⚠️）+ 标题带首行摘要，正文仍由 `MarkdownText` 渲染（公式）。④ **测试 37 条**（+2：`summarizeBrief` 单行/无开局两例；另在接线测试里断言响应带单行 `brief`）。⑤ 实测（干净测试环境，端口 39192）：`{"schemaVersion":2,"ok":true,"brief":"⚡ 今日 0/7",…}`。 |
 
 | **v2.27** | 2026-09-20 | **方向校正（决策人定调）：DSH 不做"题目的第二展示面"，插件只做"数据桥 + 小组件"**。决策人原话：题目/做题/解析**都在研数控制台**；DSH 的价值是 **agent**，插件要做的是**实时与研数 web 互通**、用**几个小组件**展示必要进度数据，并在"真正交流产生数据"后**写回控制台**。① 据此**工具改为只回数据**：`math_drill_today` 现在回「题数 / 考点分布 / 难度分布 / 题型分布 / **题号**」，**不回题面、不回答案**（实测：`今日题单：8 题 · 考点：l1n1×8 · 难度：3×4、4×2… · 题号：lin.det.af13…`）。② **删除 `toMarkdownMath()` 及其测试**：题面不再进 DSH ⇒ 那个"把裸 LaTeX 包成 `$$`"的函数成了死码（本项目对死码零容忍——上轮刚删过一个死导出）；将来若做"按需取单题"（`math_drill_question <id>`）再把它加回来。③ `MarkdownText`（公式/markdown 渲染件）**保留**：进度条、复盘、考点分布这些**数据**仍然要排版渲染。④ 测试 35 条（−2 公式包裹、+2 数据面口径；红线断言改为"连题面都不回"）。⚠️ **下一步的形状（待决策人拍板）**：agent **写回控制台**需要**服务端新增读写面**（attempts 按 ADR-007 由 judge 独占写入、且当前**没有任何 attempts 读端点**）——那属于 bridge/core 侧的改动，不在插件内。 |
+| **v2.29** | 2026-09-21 | **题库浏览（栏目 / 题卡 / 详情）+ agent 复盘落点 —— ADR-017**。决策人 2026-09-21 口述：左侧栏按学科分「栏目」，栏目内每题一张卡片、点进详情看**难度系数**；**没做过只给题面**，**做对/做错给 agent 写的复盘**；栏目内另有完成度 / 综合评分。① **落点用既有模块路由**：`modules/qbank/` 由 P3 预留窗口（`enabled=false`、`rpc` 空）变为 **`phase:"1"` + `rpc:["list","detail"]`**，只走 `/m/qbank/*` ⇒ **bridge 自有端点集合仍是五个**（§11.5 不动，refcheck C2b 不受影响）。② **新增表 `agent_notes`**（`qid/attempt_id/kind/summary/reason/author/src/ts`，core 建表）——**只读暴露，无写端点**（ADR-015 决策 5 与 ADR-007 都不破）；`Store.record_note()` 目前只有离线灌库/演示调用。③ **不回答案用结构保证**：新增 `Store.list_question_views()/get_question_view()`，其**列白名单 `_VIEW_COLS` 里根本没有 answer/analysis**（不靠"调用方记得删"）。④ ⚠️ **修一处静默丢弃**：`/m/` 分支原来只把 JSON body 当入参（`_read_json()`），模块 README 里写死的 `GET /m/<模块>/<rpc>?k=v` 形态下**查询串被无声丢掉**（模块只拿到 `{}` 还不报错）⇒ 入参改为 **body ⊕ 查询串**（查询串优先）。⑤ **前端**：`web/js/qbank.js`（新增；栏目页 = 4 个小组件 + 题卡墙，详情页 = 题面 + 作答史 + 复盘）＋ `index.html` 的「题库」栏目组（**学科清单不写死**，按接口现填）＋ `api.js` 的两个薄封装（**唯一 HTTP 出口不变**）＋ `app.js` 开一扇窄窗 `MDShell`（只有 esc/md/head/toast 四个成员）给题库页借用,并把 `/s/*`、`/q/*` 的高亮交给 qbank 自己判。⑥ ⚠️ **同批登记三处既存账本缺口（本批不补）**：**ADR-016 只有引用没有正文**（`DECISIONS.md` 全文无此条，`git log -S` 零命中，而 `2ce67ee` 的提交标题写着"ADR-016 落地"）；**§14 引用的 `v2.28` 也没有对应变更记录行**；`modules/qbank/README.md` 原写"输入原文 ✅ 已有"与 `attempts` 表结构不符（该表**不存作答原文**，故"我当时怎么错的"在数据层无来源 —— ADR-017 代价 1 已订正）。⑦ **同批更正**：§11.9 树里 `bridge/api.py` 的"挂载 /m/* 与**三个** /api/*"是 ADR-016 扩到五个之后漏改的陈旧计数（这正属 C2b 要防的"端点计数"类，实测 C2b **没抓到**——因为它的计数短语正则只认 `恰好` 那一路）；`modules/qbank/README.md` 整份重写为落地形态。 |
 
 ---
 
@@ -491,6 +492,7 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 ├── core/                          # 命脉，极薄；不含 HTTP（被 bridge 调用）
 │   ├── registry.py                # 清单扫描与装载（★ 全仓唯一的动态装载点，豁免见 §11.4.1）
 │   ├── store.py                   # blob 读写 + 版本仲裁（ADR-002）；**建表与 `schema_version` 迁移的唯一归属**（铁律 3：持久层在 core，模块不建表——v2.8 回应清单③）
+│                                  #   四张业务表 = questions / kp / attempts / **agent_notes**（agent 复盘，ADR-017；只读暴露，无写端点）
 │   ├── judge.py                   # fail-closed 判定器（ADR-003 / JUDGE_CONTRACT）
 │   └── exact/                     # ★ 第 5 命脉：精确算术（原型 drill/exact.py 迁入；T0.5 执行）
 │       ├── __init__.py            # ★ 导出面：`from core.exact import det, rank, rref, ...`（P1 钦定的调用形式；v2.8 实测：无此文件该 import 报 ImportError）
@@ -498,7 +500,8 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │       └── README.md
 ├── bridge/
 │   └── api.py                     # ★ 进程入口（python3 -m bridge.api）：HTTP 唯一持有者
-│                                  #   （凭据门 + rate-limit + 挂载 /m/* 与三个 /api/*；v2.15 措辞对齐）
+│                                  #   （凭据门 + rate-limit + 挂载 /m/* 与**五个** /api/*；v2.15 措辞对齐、v2.20 更正"三个"这个陈旧计数）
+│                                  #   ⚠️ 模块路由入参 = JSON body ⊕ 查询串（ADR-017 决策 6）
 ├── modules/                       # 一切功能：每处 = manifest.json + module.py + [page.html] + README.md + tests/
 │   ├── practice/                  # [P1] 答题会话
 │   ├── daily/                     # [P1] 每日任务单
@@ -509,7 +512,8 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   ├── vault_export/              # [P3] 错题 → Obsidian vault
 │   ├── explain_llm/               # [P5] 讲解通道（客户端直连，服务端零代理）
 │   ├── classroom/                 # [P5] enabled=false（D3）
-│   └── qbank/                     # [P3] 题库查询/整合的**预留窗口**（enabled=false、rpc 空；只走 /m/qbank/*）
+│   └── qbank/                     # [P1·ADR-017] 题库浏览（栏目/题卡/详情）：rpc = list/detail，**只读聚合**
+│                                  #   questions+attempts+agent_notes+kp；**不加端点**（只走 /m/qbank/*）。P3 原定的融合/订正链仍未做
 ├── generators/                    # 题源插件：每处 = manifest.json + 生成逻辑 + README.md + tests/
 │   ├── linalg_det/                # [P1] 线代 Ch1 行列式（Phase 1 唯一题源，见 T6/M6）
 │   ├── linalg_mat/ … linalg_quad/ # [P4] Ch2-Ch6 —— Phase 1 **不预建**这些目录（T0 只建已列出的 linalg_det / custom_json / textbook_import），P4 按需新增（v2.8 消解省略号歧义）
@@ -526,7 +530,8 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   └── server.example.toml        # 对照样例（随仓提交；**不含任何凭据**）
 ├── web/                           # ★ 静态根（bridge 只服务这个目录，见 §13.2）
 │   ├── index.html                 # ★ 入口页（fork 的 index.html；T4 在此加同步状态、隐藏 classroom 入口）
-│   ├── js/                        # fork 的 js（app.js/engine.js/…）+ ★ api.js（唯一新增接线：存储桥 + judge 客户端）
+│   ├── js/                        # fork 的 js（app.js/engine.js/…）+ ★ api.js（唯一新增接线：存储桥 + judge 客户端 + qbank 客户端）
+│   │                              #   + ★ qbank.js（题库栏目/题卡/详情页；渲染借 app.js 的 MDShell，不许自己发 HTTP；ADR-017）
 │   ├── assets/                    # css / 图标 / 字体
 │   └── tests/                     # node 测试落点（D6；run-all.js 按 __dirname 扫描 test-*.js）
 │                                  #   ⚠️ bridge 必须拒绝暴露 web/tests/** 与 dotfile

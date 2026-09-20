@@ -7,6 +7,8 @@
     ADR-015 决策 3 说"加鉴权路径不等于加端点"；**ADR-016 把只读端点从三个扩到五个**（改动必须同批改 ARCHITECTURE §11.5 主句、§13.2 表与本行）
   · `/api/*` 与 `/m/*` 一律过 **凭据门 + 限速**；凭据 = 浏览器会话 cookie **或** 服务间 Bearer，
     二者**互不可替代**；`/setup` 是**唯一不过门**的例外（它就是换凭证的入口）
+  · 模块路由 `/m/<模块>/<rpc>` 的**入参** = JSON body ⊕ 查询串（同名查询串优先，ADR-017 决策 6）；
+    当前已落地的模块路由只有 `qbank`（题库浏览，ADR-017）—— 它**不是**自有端点，端点集合不受影响
   · 静态面（`/`、`/js/*`、`/assets/*`）**匿名可读**；`web/tests/**` 与任何 dotfile → **403**
   · 次序：先路径合法性（越权 → 403），后鉴权（`/api/*`、`/m/*` **无任何凭据**（cookie 或 Bearer）→ 401）
   · token 从 `MATH_DRILL_TOKEN_FILE` 指向的文件读；**缺失或为空 → 拒绝启动**（fail-closed）
@@ -476,8 +478,21 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(HTTPStatus.NOT_FOUND, {"error": "not_found"})
                     return
                 root, name, rpc = parts
+                # ⚠️ URL 的根段是 `m`（模块路由前缀），而装载器里的键是 `<根目录>/<名>`
+                # （`modules/qbank`）—— **两者不是同一个字符串**。原实现直接拼 `m/<名>`，
+                # 于是**任何**模块 rpc 都 404（既存用例只断言"没装载的模块要 404"，
+                # 这条拼错就一直没红灯）。ADR-017 决策 7。
+                key = next((k for k in (f"modules/{name}", f"generators/{name}")
+                            if k in b.registry.loaded), f"modules/{name}")
+                # 入参 = JSON body ⊕ 查询串（ADR-017 决策 6）。理由：模块 README 里写死的
+                # 接口形态是 `GET /m/<模块>/<rpc>?k=v`，而 `_read_json()` 只读 body ——
+                # 不合并的话查询串会被**静默丢弃**（模块只拿到 {}，还不报错）。
+                # 同名参数**查询串优先**；GET 本来就没有 body，故不影响既有调用方。
+                payload = self._read_json()
+                payload.update({k: (v[-1] if isinstance(v, list) and v else v)
+                                for k, v in query.items()})
                 try:
-                    out = b.registry.dispatch(f"{root}/{name}", rpc, self._read_json(), ctx=b.store)
+                    out = b.registry.dispatch(key, rpc, payload, ctx=b.store)
                 except KeyError as exc:
                     self._send(HTTPStatus.NOT_FOUND, {"error": "no_such_rpc", "message": str(exc)})
                     return

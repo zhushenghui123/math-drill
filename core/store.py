@@ -26,7 +26,11 @@ from contracts.answer_types import Verdict
 
 __all__ = ["ConflictError", "Store", "SCHEMA_VERSION"]
 
-SCHEMA_VERSION = 1
+#: 2 = 加 `agent_notes` 表（ADR-017）。**注意迁移现状**：本文件的 schema 变更至今
+#: **全是"加表"**，靠 `CREATE TABLE IF NOT EXISTS` 每次启动幂等地补上；**没有**真正的
+#: 步进迁移（加列/改类型没有机制）。故 `ensure_schema` 允许把已记录的版本号**前推**
+#: （见其 docstring）；哪天要加列，必须先补步进迁移，不许再靠这一手。
+SCHEMA_VERSION = 2
 
 #: §3.5 的合并规则（真值副本在 contracts/blob_merge.md；两处不一致以那份为准）
 MERGE_RULES = {
@@ -82,6 +86,18 @@ CREATE TABLE IF NOT EXISTS attempts (
     user_ms INTEGER,
     device  TEXT
 );
+CREATE TABLE IF NOT EXISTS agent_notes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    qid        TEXT    NOT NULL,
+    attempt_id INTEGER,
+    kind       TEXT    NOT NULL,
+    summary    TEXT    NOT NULL,
+    reason     TEXT,
+    author     TEXT    NOT NULL,
+    src        TEXT    NOT NULL,
+    ts         REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_notes_qid ON agent_notes(qid, id);
 """
 
 
@@ -127,13 +143,22 @@ class Store:
 
     # ------------------------------------------------------------ 建表
     def ensure_schema(self) -> int:
-        """建表 + `schema_version`（本文件的独占职责；模块不得建表）。"""
+        """建表 + `schema_version`（本文件的独占职责；模块不得建表）。
+
+        版本号**只前推、不回退**：老库（记录着 1）在本函数跑完后会被写成当前版本，
+        因为至今全部 schema 变更都是"加表"，`CREATE TABLE IF NOT EXISTS` 已经幂等地
+        把结构补齐了。**这不是通用迁移机制**——加列/改类型那天必须补步进迁移，
+        否则版本号会变成一句假话（ADR-017 代价 5）。
+        """
         with self._lock:
             self.conn.executescript(_SCHEMA)
             cur = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'")
             row = cur.fetchone()
             if row is None:
                 self.conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?)",
+                                  (str(SCHEMA_VERSION),))
+            elif int(row["value"]) < SCHEMA_VERSION:
+                self.conn.execute("UPDATE meta SET value = ? WHERE key='schema_version'",
                                   (str(SCHEMA_VERSION),))
             self.conn.commit()
             return self.schema_version
@@ -255,6 +280,56 @@ class Store:
         with self._lock:
             return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
 
+    def list_attempt_stats(self) -> list[dict]:
+        """按题聚合的只读视图：`[{qid, n, correct, first_ts, last_ts}, …]`。
+
+        为什么在 SQL 里聚合：题库视图要回答"这题做了没有 / 对几次错几次"，
+        而 `list_attempts()` 会把**全部**行搬进内存——题量上去后这是 O(全部历史)。
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT qid, COUNT(*) AS n, SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS correct,"
+                " MIN(ts) AS first_ts, MAX(ts) AS last_ts FROM attempts GROUP BY qid"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------ agent 复盘（ADR-017）
+    def record_note(self, *, qid: str, kind: str, summary: str, reason: str | None = None,
+                    author: str = "agent", src: str = "offline", attempt_id: int | None = None,
+                    ts: float | None = None) -> int:
+        """写入一条 agent 复盘。**没有任何 HTTP 端点调它**（ADR-017 决策 2：写权仍关闭）。
+
+        当前唯一调用方是离线灌库/本地演示；将来若给 agent 开写权，必须先按
+        ADR-015 代价 5 重开 ADR-002（blob 双写者），本方法是那一步的落点。
+        """
+        if not qid or not summary:
+            raise ValueError("agent_notes 至少要 qid 与 summary")
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO agent_notes(qid, attempt_id, kind, summary, reason, author, src, ts) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (qid, attempt_id, kind, summary, reason, author, src,
+                 time.time() if ts is None else ts),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
+
+    def list_notes(self, *, qid: str | None = None) -> list[dict]:
+        """agent 复盘（按 id 升序；一次给全或按题过滤）。"""
+        sql = ("SELECT id, qid, attempt_id, kind, summary, reason, author, src, ts "
+               "FROM agent_notes")
+        args: tuple = ()
+        if qid:
+            sql += " WHERE qid = ?"
+            args = (qid,)
+        sql += " ORDER BY id"
+        with self._lock:
+            return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def note_count(self) -> int:
+        with self._lock:
+            return int(self.conn.execute("SELECT COUNT(*) AS c FROM agent_notes").fetchone()["c"])
+
     # ------------------------------------------------------------ questions / kp
     def load_questions(self, rows: list[dict]) -> int:
         """灌库（T6 的 `scripts/db_init.py` 调用）——幂等 upsert。"""
@@ -296,6 +371,26 @@ class Store:
                 " difficulty, source FROM questions ORDER BY id"
             ).fetchall()
             return [dict(r) for r in rows]
+
+    #: 题库浏览视图的列 —— **结构上不含 answer / analysis**（ADR-017 决策 3）。
+    #: 用"列白名单"而不是"调用方记得删"：漏删是静默泄露，漏加是当场报错。
+    _VIEW_COLS = "id, kid, type, answer_type, stem, options, difficulty, source"
+
+    def list_question_views(self) -> list[dict]:
+        """题库浏览用的题目行（不含答案与解析）。"""
+        with self._lock:
+            rows = self.conn.execute(
+                f"SELECT {self._VIEW_COLS} FROM questions ORDER BY id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_question_view(self, qid: str) -> dict | None:
+        """单题浏览视图（不含答案与解析）；没有则 None。"""
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT {self._VIEW_COLS} FROM questions WHERE id = ?", (qid,)
+            ).fetchone()
+            return dict(row) if row else None
 
     def load_kp(self, rows: list[dict]) -> int:
         n = 0

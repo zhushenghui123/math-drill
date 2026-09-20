@@ -6,9 +6,11 @@
  *   ③ 判定一律 POST /api/judge —— 前端不再有任何比对逻辑（JUDGE_CONTRACT I1）
  *   ④ 不得新增第二个端口 / 第二个网关（ARCHITECTURE §11.5）
  *
- * 预留窗口（题库，Phase 3）：`/m/qbank/*` 的薄封装将来加在这里，例如
- *   qbank.list({type, difficulty, done}) → GET  /m/qbank/list
- *   qbank.detail(qid)                    → GET  /m/qbank/detail
+ * 题库窗口（ADR-017，已落地）：`/m/qbank/*` 的薄封装在文件末尾：
+ *   qbankList({subject, kid, done, limit}) → GET /m/qbank/list
+ *   qbankDetail(qid)                       → GET /m/qbank/detail
+ * ⚠️ 这两条**不是新端点**：它们是模块路由 `/m/<模块>/<rpc>`（端点集合仍是五个）；
+ *    服务端**不回 answer/analysis**，所以这里也没有"要答案"的方法。
  */
 (function (root) {
   'use strict';
@@ -200,10 +202,39 @@
       });
     },
 
+    /* 题库浏览（ADR-017）：栏目页与题目详情页的数据源。
+       ⚠️ 服务端**永不回答案与解析**（列白名单在 core/store.py 的 _VIEW_COLS），
+          所以这里拿到的东西可以放心直接渲染。 */
+    qbankList: function (opts) {
+      opts = opts || {};
+      var qs = [];
+      if (opts.subject) qs.push('subject=' + encodeURIComponent(opts.subject));
+      if (opts.kid) qs.push('kid=' + encodeURIComponent(opts.kid));
+      if (opts.done !== undefined && opts.done !== null) qs.push('done=' + (opts.done ? 'true' : 'false'));
+      if (opts.limit) qs.push('limit=' + encodeURIComponent(opts.limit));
+      return moduleGet('/m/qbank/list', qs, '题库载入失败');
+    },
+
+    qbankDetail: function (qid) {
+      return moduleGet('/m/qbank/detail', ['qid=' + encodeURIComponent(qid)], '题目载入失败');
+    },
+
     /* 同步状态订阅（给 index.html 的状态灯用） */
     onChange: function (fn) { listeners.push(fn); try { fn(status()); } catch (e) { /* 忽略 */ } },
     status: status
   };
+
+  /* 模块路由的 GET（查询串即入参；服务端把 query 合并进 payload）。
+     统一在这里把非 200 变成带 code 的 Error —— 调用方的 catch 只认这一种形状。 */
+  function moduleGet(path, qs, failMsg) {
+    return request('GET', path + (qs && qs.length ? '?' + qs.join('&') : '')).then(function (r) {
+      if (r.status === 200 && r.data) return r.data;
+      var err = new Error((r.data && (r.data.message || r.data.error)) || (failMsg + ' HTTP ' + r.status));
+      err.code = r.data && r.data.error;
+      err.status = r.status;
+      throw err;
+    });
+  }
 
   root.MDStore = MDStore;
 })(typeof window !== 'undefined' ? window : this);

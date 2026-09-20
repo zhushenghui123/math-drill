@@ -323,3 +323,25 @@ Chandra 2 的「硬件闸门未验」升级为**已判定不适配**：实测为
     ⚠️ **归位更正（v2.1 评审 L7）**：「**服务端不存 key**」这条红线**不在 ADR-011 名下** —— 其真源是四处（`ARCHITECTURE.md` 威胁模型表与配置表、`BOUNDARY.md` 对 `llm.js` 的裁定、`modules/explain_llm/module.py` 的文件 docstring），而 ADR-011 管的是 token 与静态根。详见代价 3。
 
 - **裁判**：独立第三方评审三轮 + 定点确认 —— v1 判「方向成立、形态成立、**交付物不成立**」（2 阻塞）→ v2 判「**成立、零阻塞级**」→ v2.1 判「**通过、方案定稿**」。原始方案与三轮报告留档于 `~/workspaces/claude/`（不在本仓）。
+
+---
+
+## ADR-017 · 题库浏览（栏目 / 题卡 / 详情）与 agent 复盘的落点（2026-09-21，决策人提出）
+
+- **背景**：决策人 2026-09-21 口述需求 —— 左侧边栏按学科做「栏目」（线性代数 / 高等数学 / …），栏目内是该学科的题目，**每题一张卡片、可点进详情**；详情显示**难度系数**，**没做过 → 只展示题目**，**做对 → agent 写的"当时怎么对的"**，**做错 → "当时怎么错的 + 错误原因"**；栏目内另有"完成度 / 综合评分"一类小组件。并要求**先入库一道题目**，满意后再批量。
+  这与 `modules/qbank/README.md`（2026-09-17 决策人口述留档）预留的需求**完全同形** ⇒ 本 ADR 把它从 P3 提前到 P1，且**只做只读浏览子集**。
+  ⚠️ 同批发现：`ARCHITECTURE.md:714` 引用的 **ADR-016（只读数据面）在 `DECISIONS.md` 里根本不存在**（`git log -S "ADR-016 ·"` 零命中，尽管 `2ce67ee` 的提交标题写着"ADR-016 落地"）。本 ADR **不复用 016 这个号**；补写 ADR-016 是独立待办，不在本批。
+- **决策**：
+  1. **落点用既有的模块路由**：`/m/qbank/list` 与 `/m/qbank/detail`（`modules/qbank/`，`phase` 3 → 1）。**bridge 自有端点集合仍是五个**（§11.5 一字不改，refcheck 的 C2b 不受影响）—— 这是 `ARCHITECTURE.md:454` 明写的 `/m/<模块>/<rpc>` 路线，不是新增端点。
+  2. **新增表 `agent_notes`**（core 建表，铁律 3 不破）：`qid + kind + summary（人话）+ reason（错误原因）+ author + src + ts`。**本期只读暴露，不开任何写端点** —— ADR-015 决策 5「起步期 agent 不碰写面」与 ADR-007「attempts 由 judge 独占写入」都不破。
+  3. **详情永不回 `answer` / `analysis`**：题目正文可以给，答案与解析一律不给（与 ADR-016 决策 4 同向，且正好实现"没做过只展示题目"）。
+  4. **难度系数 = 现有 `questions.difficulty`**（1-4），UI 翻译成星级 + 文字；选题器的 τ 与权重不因本 ADR 改变。
+  5. **出处用现有 `questions.source` 单列承载**（形如 `ocr:tongji-quanjie-1 p8 习题1-1(1)`），**不新增 provenance 列**：完整 provenance（book / page / ocr / segment / verified / relations，DATA_PIPELINE §2.A）留待灌库批量期另立 ADR。
+- **代价（承认）**：
+  1. **"我当时如何错的"在数据层没有来源**：`attempts` 表只有 `verdict / correct / user_ms / device`，**没有作答原文**（`modules/qbank/README.md` 写的"输入原文 ✅ 已有"是**错的**，同批订正）。⇒ 复盘的"怎么错的"只能来自 agent 与决策人的对话，从库里推不出来。将来要么给 attempts 加列（需迁移机制，见代价 5），要么由 agent 写入时把上下文一并落进 `agent_notes`。
+  2. **第二个写者的先声**：`agent_notes` 在形态上就是 ADR-002 双写者风险的第一个落点。本期**无写端点**故不激活；**一旦给 agent 开写权，必须按 ADR-015 代价 5 重开 ADR-002**。
+  3. **题面经 `/m/qbank/*` 对持服务间凭据者同样可读**（只剥答案、不剥题面）—— 与"版权数据跨机传输"同属 ADR-015 代价 6 那条威胁。本 ADR 不新开传输面，但登记在此。
+  4. **qbank 从 P3 提前 ⇒ P3 原本的能力仍未做**：跨源融合去重（DATA_PIPELINE §3）、订正/重做链、**"报错"回流队列**（ADR-014 保留的第二项最小投资）都还在待办里。
+  5. **`schema_version` 1 → 2，但没有迁移机制**（既存缺陷，独立复核已点过：`ensure_schema` 只在缺行时插版本号，全文无 ALTER / migrate）。新表靠 `CREATE TABLE IF NOT EXISTS` 天然兼容旧库，**所以本期只加表、不加列** —— 这是绕开，不是解决；加列那天必须先补迁移。
+- **与既有 ADR 的关系**：**不破** ADR-002（blob 合并规则未动，`agent_notes` 不在 blob 内）、ADR-005（仍纯 stdlib）、ADR-007（attempts 独占写入未动）、ADR-015 决策 5（无写端点）。**触及但不在本 ADR 内解决**：ADR-014（报错按钮 + `suspect` 标记的 UI 落点本页最合适，本期未做）、ADR-016（悬空引用，见背景）、ADR-013（本页不显示答案，故不涉及"标准答案来源"）。
+- 裁判：决策人提出需求形态；执行方落结构，并**主动登记三条既有缺陷**（attempts 无作答原文 / ADR-016 悬空 / qbank README 自述与 schema 不符）。

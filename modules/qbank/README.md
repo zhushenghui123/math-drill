@@ -1,62 +1,57 @@
-# qbank（题库窗口 —— 预留，未实现）
+# qbank（题库浏览：栏目 / 题卡 / 详情）
 
 ## 一句话
 
-给"题库数据的整合与提炼"预留的模块位置：查询、按类/难度筛选、做题与勘误的溯源视图。
+控制台左侧「题库」栏目的数据面：**按学科列出题目卡片**、**进详情看难度与我的复盘**。
+只读聚合 `questions` + `attempts` + `agent_notes` + `kp`；不写表、不判定。
 
-## 为什么需要它（需求侧，用户 2026-09-17 口述）
+> 规格 = **ADR-017**（2026-09-21）。本模块原来是 `enabled=false` 的 P3 预留窗口，
+> 该 ADR 把**只读浏览子集**提前到 P1；P3 的其余部分（融合去重、订正链、报错回流）仍未做。
 
-> 「不同类型的题目分别存；不同难度的题目标上；哪个题目做了、哪个没做；做了的当时怎么错的、
-> 后来怎么修正的 —— 都有溯源。」
+## 对外接口（**走既有模块路由，不是新端点**）
 
-## 现状映射（先说哪些**已经**有，别重复造）
+```
+GET /m/qbank/list?subject=linear&kid=l1n1&done=false&limit=80   # 栏目页（items 受筛选，subjects 恒为全量）
+GET /m/qbank/detail?qid=<qid>                                   # 详情页（题面 + 作答史 + agent 复盘）
+```
 
-| 用户要的 | 现有契约里的落点 | 状态 |
+两条都过 bridge 的**凭据门 + 限速**（`/m/*` 与 `/api/*` 同待遇），且**不加端点** ——
+bridge 自有端点集合仍是五个（ARCHITECTURE §11.5 与 refcheck C2b 都不受影响）。
+入参 = JSON body ⊕ 查询串（查询串优先，ADR-017 决策 6：原实现只读 body，查询串会被**静默丢弃**）。
+
+## 需求侧对照（决策人 2026-09-17 与 2026-09-21 两次口述）
+
+| 决策人要的 | 现在的落点 | 状态 |
 |---|---|---|
-| 不同类型分别存 | `questions.answer_type`（rational/vector/matrix/…，JUDGE_CONTRACT §2） | ✅ 已有 |
-| 难度标注 | `questions.difficulty`（1-4，ARCHITECTURE §3.1） | ✅ 已有 |
-| 哪个做了 / 没做 | `attempts` 表（judge 独占写入，append-only，ADR-007） | ✅ 已有 |
-| 当时怎么错的 | `attempts.verdict` + `correct` + 输入原文（JUDGE_CONTRACT §4） | ✅ 已有 |
-| 出自哪本书/哪一页 | `provenance`（DATA_PIPELINE §2.A：book/page/ocr/segment） | ✅ 已有（数据侧） |
-| 可复现（同参数同题） | `questions.gen_params` + `id = hash(gen_params)` | ✅ 已有 |
-| **"后来怎么修正的"** | ⚠️ **暂无**：需要"订正/重做链"（如 `parent_attempt_id` 或 revision 记录） | ❌ 待设计 |
-| **跨源融合/去重** | DATA_PIPELINE §3（dup_group / family / 冲突仲裁） | 🟡 设计有、代码无 |
+| 按学科分栏目 | `list` 的 `subjects[]` + 前端侧栏（学科清单**不写死**，由接口现填） | ✅ |
+| 每题一张卡片、可点进去 | `list.items[]` → `#/s/<学科>` 卡片墙 → `#/q/<题号>` | ✅ |
+| 难度系数评级 | `questions.difficulty`（1-4）→ 前端显示 ★ + 文字（数值才是真值） | ✅ |
+| 没做过 → 只展示题目 | 详情页**只有题面**（服务端不回 answer/analysis，见下） | ✅ |
+| 做对 / 做错 → agent 写的复盘 | `agent_notes`（`kind / summary / reason / author / src`） | ✅ 读取；**写入通道未开** |
+| 完成度 / 综合评分小组件 | `subjects[].coverage`（做过的题 ÷ 总题数）/ `.score`（做对过的题 ÷ 总题数）/ `.accuracy` | ✅ 定义写死在 `module.py` 顶部 |
+| 出自哪本书 / 哪一页 | `questions.source` 单列（如 `ocr:tongji-quanjie-1 p27 习题1-6 1(3)`） | 🟡 单列承载；结构化 provenance 待灌库 ADR |
+| "我当时怎么错的"（**作答原文**） | ❌ **没有落点** —— `attempts` 表只有 `verdict/correct/user_ms/device`，**不存输入原文**（本 README 旧版写"输入原文 ✅ 已有"是**错的**，ADR-017 代价 1 已订正） | ❌ 待定 |
 
-## 对外接口（预留形态，**Phase 3 才定稿**）
+## 红线（改本模块前先读）
 
-只走既有网关，**不开第二个端口**（ARCHITECTURE §11.5：bridge 是唯一 HTTP 面；第二端口会绕过 token 门与限速）：
-
-```
-GET /m/qbank/list?type=rational&difficulty=3&done=false   # 筛选
-GET /m/qbank/detail?qid=<qid>                             # 单题 + 我的作答史 + 出处
-GET /m/qbank/erratum                                      # 我报过的错题/勘误（回流数据管线）
-```
-
-客户端侧：`web/js/api.js` 已预留同名的薄封装位。加新 rpc 时，manifest 的 `rpc[]` 与
-`contracts/events.py`（如要发事件）同 commit 变更（MODULE_TEMPLATE §8）。
-
-## 数据流（预期）
-
-```
-questions（题）+ attempts（事实日志）+ provenance（出处）
-        ↓ 只读聚合（不写表、不判定）
-   /m/qbank/*  →  web 界面
-        ↓ 用户报错
-   勘误队列 → DATA_PIPELINE §2 验证分级（unverified 永不进练习池）
-```
-
-## 依赖
-
-- `core`：存储受控视图（只读 `questions` / `attempts`）
-- `contracts`：`answer_types.py`（类型枚举）
-- 不引入任何第三方依赖（H1）
+1. **不回答案**：题目行只从 `Store.list_question_views()` / `get_question_view()` 取 ——
+   这两个访问器的**列白名单里没有 answer/analysis**（ADR-017 决策 3）。要"结构上不可能泄露"，
+   不要"调用方记得删"。
+2. **只读**：不建表（铁律 3）、不写表、不判定（判定一律 `core.judge`）。
+3. **时间降粒度到天**：与 `/api/attempts` 同口径（不把"你几点在做题"发出去）。
+4. **写权仍关闭**：`Store.record_note()` 目前**没有任何 HTTP 端点调它**（ADR-017 决策 2）。
+   将来给 agent 开写权，必须先按 ADR-015 代价 5 重开 ADR-002（blob 双写者）。
 
 ## 未做 / 已知限制
 
-- 现在 **`rpc` 为空、`enabled=false`**：本模块只是窗口，不代表任何承诺。
-- "订正链"的数据形态未设计——**动它之前先写 ADR**（涉及 attempts 的事实源语义，ADR-007）。
-- 不做判定：任何答案比对一律调 `core.judge`（铁律 3）。
+- 融合去重（DATA_PIPELINE §3）、订正/重做链、**报错按钮回流**（ADR-014 的第二项最小投资）——都还没做。
+- `agent_notes` 的**写入**目前只有离线灌库/演示：插一条
+  `Store.record_note(qid=…, kind=…, summary=…, reason=…, src='offline')`。
+- 存量库的 `schema_version` 会由 `ensure_schema` 从 1 **前推**到 2（加表幂等）；
+  **加列那天必须先补真正的步进迁移**（ADR-017 代价 5）。
 
-## 验收方式（Phase 3 落地时补）
+## 验收
 
-（待定：至少覆盖"按类/难度筛选"与"溯源链可回溯到 provenance"两类用例。）
+- `tests/test_qbank_module.py`：只读聚合、列白名单（**结构上无 answer/analysis**）、
+  指标定义、日粒度、未知 qid → 404。
+- `tests/test_api.py`：`/m/qbank/list` 走凭据门；GET 查询串真的进了 payload。

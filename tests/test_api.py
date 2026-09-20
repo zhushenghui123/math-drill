@@ -33,6 +33,7 @@ from core.store import Store  # noqa: E402
 
 TOKEN = "test-token-not-a-secret-1234567890"
 QUESTION = {"id": "linalg.det.3x3.a", "answer_type": "rational", "answer": "-3",
+            "stem": "计算三阶行列式的值", "analysis": "按第一行展开",
             "kid": "c1n1", "difficulty": 2, "type": "blank", "source": "generated"}
 
 
@@ -407,3 +408,68 @@ class AgentReadSurfaceCase(APITestCase):
     def test_33_attempts_rejects_bad_params(self) -> None:
         status, body, _ = _req(self.url("/api/attempts?days=abc"), bearer=self.bearer)
         self.assertEqual(status, 400, body)
+
+
+class QBankSurfaceCase(ServerCase):
+    """ADR-017：题库浏览走**模块路由** `/m/qbank/*`（不是新端点）。
+
+    这里只测"路由这一层"的三件事：凭据门是否覆盖它、**查询串是否真的进了 payload**、
+    以及详情页是否**结构上**拿不到答案。聚合逻辑本身的用例在 `test_qbank_module.py`。
+
+    继承 `ServerCase`（**只取夹具**）而不是 `APITestCase` —— 后者带着整套契约用例，
+    继承它会让那 17 条在本类里再跑一遍（`ServerCase` 的注释里正是为这类事拆的夹具）。
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # QUESTION.kid = c1n1 ⇒ 归到 calculus（不建 kp 的话每题都是 unknown，筛选就测不出东西）
+        self.store.load_kp([{"id": "c1n1", "title": "数列极限的定义",
+                             "chapter": "第一章 函数、极限与连续", "subject": "calculus",
+                             "exam": "all", "related": None}])
+
+    def test_40_module_route_behind_credential_gate(self) -> None:
+        status, body, _ = _req(self.url("/m/qbank/list"))
+        self.assertEqual(status, 401, "模块路由与 /api/* 同待遇：无凭据必 401")
+        self.assertEqual(body["error"], "unauthorized")
+
+    def test_41_list_for_browser_has_no_answer(self) -> None:
+        status, body, _ = _req(self.url("/m/qbank/list"), cookie=self.cookie)
+        self.assertEqual(status, 200, body)
+        self.assertEqual([i["qid"] for i in body["items"]], [QUESTION["id"]])
+        blob = json.dumps(body, ensure_ascii=False)
+        self.assertNotIn('"answer"', blob)
+        self.assertNotIn('"analysis"', blob)
+        self.assertNotIn(QUESTION["answer"], blob)
+
+    def test_42_query_string_reaches_module_payload(self) -> None:
+        """**回归用例（ADR-017 决策 6）**：原实现只把 JSON body 当入参，
+        模块 README 写的 `GET …?subject=` 形态下查询串会被静默丢弃 ——
+        那样这条 URL 会返回 1 条（筛选失效），而不是 0 条。"""
+        status, hit, _ = _req(self.url("/m/qbank/list?subject=calculus"), cookie=self.cookie)
+        self.assertEqual(status, 200, hit)
+        self.assertEqual(len(hit["items"]), 1)
+        status, miss, _ = _req(self.url("/m/qbank/list?subject=linear"), cookie=self.cookie)
+        self.assertEqual(status, 200, miss)
+        self.assertEqual(miss["items"], [], "筛选参数没进 payload 时这里会是 1 条（假绿）")
+
+    def test_43_detail_keeps_stem_strips_answer(self) -> None:
+        status, body, _ = _req(self.url(f"/m/qbank/detail?qid={QUESTION['id']}"),
+                               bearer=self.bearer)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["question"]["stem"], QUESTION["stem"])
+        self.assertNotIn('"answer"', json.dumps(body, ensure_ascii=False))
+        # 未知题号 → 404（URL 必须是 ASCII：urllib 不做百分号编码，中文要自己 encode）
+        status, body, _ = _req(self.url("/m/qbank/detail?qid=no-such-qid"), cookie=self.cookie)
+        self.assertEqual(status, 404)
+        self.assertEqual(body["error"], "no_such_rpc")
+
+    def test_44_detail_reflects_attempt_day_only(self) -> None:
+        _req(self.url("/api/judge"), method="POST",
+             body={"qid": QUESTION["id"], "raw_answer": QUESTION["answer"]}, cookie=self.cookie)
+        status, body, _ = _req(self.url(f"/m/qbank/detail?qid={QUESTION['id']}"),
+                               cookie=self.cookie)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["done"])
+        self.assertTrue(body["correct"])
+        self.assertIn("day", body["attempts"][0])
+        self.assertNotIn("ts", body["attempts"][0])

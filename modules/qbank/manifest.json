@@ -1,8 +1,9 @@
 {
   "name": "qbank",
-  "phase": "3",
-  "enabled": false,
-  "rpc": [],
+  "phase": "1",
+  "enabled": true,
+  "rpc": ["list", "detail"],
   "blob_fields": [],
-  "description": "题库查询与整合的预留窗口（形态待设计；只走 bridge 的 /m/qbank/*，不开第二个端口）"
+  "deps": ["core"],
+  "description": "题库浏览（栏目 / 题卡 / 详情）：只读聚合 questions + attempts + agent_notes + kp（ADR-017；只走 bridge 的 /m/qbank/*，不开第二个端口）"
 }
