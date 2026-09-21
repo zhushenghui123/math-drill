@@ -94,12 +94,23 @@ def anchor_spans(text: str) -> list[tuple[int, int, int, str, str]]:
     return sorted(uniq, key=lambda t: t[0])
 
 
-def loose_anchors(text: str, profile: dict | None = None) -> list[tuple]:
+def loose_anchors(block, profile: dict | None = None, btype: str | None = None) -> list[tuple]:
     """`anchor_spans` 的瘦身版：`[(题号, 原始串, 来源)]`。
 
     `profile["number_kind"] == "chapter_scoped"` 时（吉米概率 `【N.M】` 逐章重算）：
     题号是**标签（字符串）**、来源恒 `ocr`（不做形态容错，因为**邻号对账不成立** ⇒ 讹变只能交人工）。
+
+    `profile["require_section"]` 时（同济/浙大：`习题 N-M` 分节、节内 `N.` 起头）：
+    只认**习题节内**的行首编号 —— 否则正文里的"1. 定义 / 2. 定理"会被误当成题目。
+    ⚠️ 实测：这本书的行首题号 **681 个在 text 块**、只有 11 个在 `paragraph_title` 里
+    （我第一版按"标题型"取，只捞到 11 个 —— 抽样那页恰好是少数派）。
     """
+    if isinstance(block, dict):
+        text, btype, in_section = block["text"], block["type"], block.get("in_section", True)
+    else:
+        text, in_section = str(block), True
+    if profile and profile.get("require_section") and not in_section:
+        return []
     if profile and profile.get("number_kind") == "chapter_scoped":
         return [(m.group(1), m.group(0), "ocr") for m in profile["anchor"].finditer(text)]
     return [(n, raw, kind) for _, _, n, raw, kind in anchor_spans(text)]
@@ -149,12 +160,26 @@ def load_blocks(corpus: Path, book: str, lo: int, hi: int) -> tuple[list[dict], 
     for b in raw_blocks:
         for piece in split_multi_anchor(b):
             blocks.append({"gid": len(blocks), **piece})
+
+    # "习题节内"状态（只对声明了 require_section 的书算）：`习题 N-M` 标题开节，
+    # 下一个**非习题**的 doc_title/paragraph_title 关节。没声明该字段的书，全部块视为"节内"。
+    sec_re = profile.get("require_section")
+    if sec_re:
+        in_sec = False
+        for b in blocks:
+            if b["type"] in ("doc_title", "paragraph_title"):
+                if sec_re.search(b["text"]):
+                    in_sec = True
+                else:
+                    in_sec = False
+            b["in_section"] = in_sec
+
     return blocks, src
 
 
 def anchor_windows(blocks: list[dict], per_window: int, profile: dict | None = None) -> list[list[dict]]:
     """窗口边界对齐到"带锚点的块" —— 保证一道题不被窗口劈开（机械职责）。"""
-    starts = [i for i, b in enumerate(blocks) if loose_anchors(b["text"], profile)]
+    starts = [i for i, b in enumerate(blocks) if loose_anchors(b["text"], profile, b["type"])]
     if not starts:
         return [blocks]
     out = []
@@ -283,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         {"gid": b["gid"], "page": b["page"], "idx": b["idx"], "number": n, "seq": k + 1,
          "raw": raw, "source": kind}
         for k, (b, n, raw, kind) in enumerate(
-            (b, *a) for b in blocks for a in loose_anchors(b["text"], profile))
+            (b, *a) for b in blocks for a in loose_anchors(b["text"], profile, b["type"]))
     ], global_numbering=not scoped)
     windows = anchor_windows(blocks, args.q_per_window, profile)
     print(f"{args.book} page_idx {lo}-{hi}：{len(blocks)} 块 · {len(anchors)} 个锚点"
@@ -382,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         for i, win in enumerate(windows):
             # ⚠️ 完成判据必须用**块号覆盖**，不能用题号 ——
             # `【N.M】` 是逐章重算的（标签跨章重复），拿题号判断会把已完成的窗口全部重跑并重复追加（实测踩过）。
-            win_gids = {b["gid"] for b in win if loose_anchors(b["text"], profile)}
+            win_gids = {b["gid"] for b in win if loose_anchors(b["text"], profile, b["type"])}
             covered = {g for q in questions for g in q["_stem_gids"]}
             if args.resume and win_gids and win_gids <= covered:
                 print(f"  窗口 {i + 1}/{len(windows)}：已完成，跳过", flush=True)

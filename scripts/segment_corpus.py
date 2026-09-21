@@ -67,6 +67,61 @@ PROFILES: dict[str, dict] = {
         "known_gaps": [],
         "known_duplicates": [],
     },
+    # 同济 / 浙大：`习题 N-M` 分节，节内题号 `N.` 是**标题行**（实测同济全解上 697 个行首编号、
+    # 400 个行首「解」）。⇒ ① 锚点只从 `paragraph_title` 里取；② 节内重算 ⇒ 不做邻号对账。
+    "tongji-quanjie-1": {
+        "dir": "tongji-quanjie-1-同济高等数学习题全解指南上册",
+        "title": "同济 高等数学习题全解指南 上册（第七版）",
+        "anchor": re.compile(r"^\s*(\d{1,3})\.\s"),
+        "require_section": re.compile(r"^\s*(?:总)?习题\s*\d"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None, "known_gaps": [], "known_duplicates": [],
+    },
+    "tongji-quanjie-2": {
+        "dir": "tongji-quanjie-2-同济高等数学习题全解指南下册",
+        "title": "同济 高等数学习题全解指南 下册（第七版）",
+        "anchor": re.compile(r"^\s*(\d{1,3})\.\s"),
+        "require_section": re.compile(r"^\s*(?:总)?习题\s*\d"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None, "known_gaps": [], "known_duplicates": [],
+    },
+    "zheda-quanjie": {
+        "dir": "zheda-quanjie-浙大概率论与数理统计习题全解指南",
+        "title": "浙大 概率论与数理统计 习题全解指南（第四版）",
+        "anchor": re.compile(r"^\s*(\d{1,3})\.\s"),
+        "require_section": re.compile(r"^\s*(?:总)?习题\s*\d"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None, "known_gaps": [], "known_duplicates": [],
+    },
+    # 教材三本：**例题（例N）**是"题目+解答同书"的部分 —— 决策人 2026-09-21 明确要求
+    # "没有答案的、光有例题的也能跑"（ADR-020）。课后习题（习题 N-M）无答案，暂不取。
+    "tongji-jiaocai-1": {
+        "dir": "tongji-jiaocai-1-同济高等数学教材上册第七版",
+        "title": "同济 高等数学 教材 上册（第七版）",
+        "anchor": re.compile(r"^\s*例\s*(\d{1,3})"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None, "known_gaps": [], "known_duplicates": [],
+    },
+    "tongji-jiaocai-2": {
+        "dir": "tongji-jiaocai-2-同济高等数学教材下册第七版",
+        "title": "同济 高等数学 教材 下册（第七版）",
+        "anchor": re.compile(r"^\s*例\s*(\d{1,3})"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None, "known_gaps": [], "known_duplicates": [],
+    },
+    "zheda-jiaocai": {
+        "dir": "zheda-jiaocai-浙大概率论与数理统计教材第四版",
+        "title": "浙大 概率论与数理统计 教材（第四版）",
+        "anchor": re.compile(r"^\s*例\s*(\d{1,3})"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None, "known_gaps": [], "known_duplicates": [],
+    },
 }
 
 
