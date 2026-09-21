@@ -329,7 +329,9 @@ class Bridge:
         为什么先这么简单：Phase 1 的目标是"能稳定做题"，真正的选题器是 P2b 的 `modules/picker`。
         这里不引入复杂度，只保证「今天这 8 题今天不变」。
         """
-        rows = self.store.list_questions()
+        # ADR-019 决策 4：**未审核的语料题不进练习池**。练习池 = practice_pool()（排除 verify='unverified'），
+        # 而 `list_questions()` 仍给"题库栏目"用 —— "看得见"与"能拿来练"是两条不同的门。
+        rows = self.store.practice_pool()
         if not rows:
             return []
         seed = int(hashlib.sha1(date.today().isoformat().encode("utf-8")).hexdigest()[:8], 16)

@@ -531,7 +531,8 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   ├── answer_types.py            # answer_type 枚举（JUDGE_CONTRACT §2 的机器可读化）
 │   ├── events.py                  # 事件名枚举（唯一真值）
 │   ├── dep_matrix.toml            # 6×6 允许依赖矩阵（test_dep_rules 读它执法）
-│   └── blob_merge.md              # blob 合并规则真值（ADR-002/007）
+│   ├── blob_merge.md              # blob 合并规则真值（ADR-002/007）
+│   └── corpus_segment.md          # ② 切题段产物契约（字段清单 + 旁表 DDL 骨架；ADR-019）
 ├── config/
 │   ├── modules.toml               # 启停表（tomllib 只读；全仓禁 YAML）
 │   ├── server.toml                # ★ 运行时常量真值（§13.1：绑定/端口/cookie TTL/限速/data_dir/τ）
@@ -551,6 +552,9 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   ├── test_registry.py           # [T3] MANIFEST 校验与装载（被测对象 `core/registry.py` 是 T3 产出；T0 建骨架，v2.9 改标——原标 [T0] 会造成"越界/空壳/红"三解）
 │   └── test_picker.py             # [P2b 先写]
 ├── scripts/                       # gen_bundles.py（打包 bundle）· db_init.py（**建表 + schema_version + 灌 bundle**，T7 部署前置）· backup_check.sh · refcheck.py（**文档自洽护栏，规格见 §14**）
+│                                  #   ★ 数据管线（ADR-019）：segment_corpus.py（② A 组基线·纯正则）· segment_ab.py（② A/B 实验台）
+│                                  #     · segment_hybrid.py（② **生产**：机械锚点+模型语义+校验）· annotate_kp.py（④ 68 考点标注）
+│                                  #     · import_candidates.py（灌库：questions + question_provenance 旁表）
 ├── deploy/                        # math-drill.service / caddy.block / backup.timer + backup.service（timer 必须配对 oneshot）/ logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
 ├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE
 │                                  #   / MODULE_TEMPLATE / IMPLEMENTATION_BRIEF / DECISIONS

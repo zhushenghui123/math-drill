@@ -87,6 +87,11 @@
 
   /* 难度：生效值 + 来源标记。agent 评过的，把题库原生值放在 title 里做对照。 */
   function diffHtmlOf(item) {
+    // 难度为 null = 谁都没标过（语料题就是这种状态，ADR-018/019）。**不能默认成 2**
+    // —— 那会把"未标"显示成"基础"，用户以为有人评过（实测截图里 126 张卡全被这么误导过）。
+    if (item.difficulty === null || item.difficulty === undefined) {
+      return '<span class="qb-diff qb-diff-none" title="还没人标过难度：题库原生没标，agent 也还没评">未标难度</span>';
+    }
     var html = diffHtml(item.difficulty);
     if (item.difficultySource === 'agent') {
       var base = (item.difficultyBase === null || item.difficultyBase === undefined)
@@ -100,6 +105,14 @@
     if (!item.done) return '<span class="qb-tag qb-tag-new">未做</span>';
     if (item.correct > 0) return '<span class="qb-tag qb-tag-ok">做对过</span>';
     return '<span class="qb-tag qb-tag-bad">做错过</span>';
+  }
+
+  /* ADR-019：语料题是 `unverified` —— **看得见、不能练**（不进每日一练）。
+     界面上必须标出来，否则用户会问"为什么这题点进去没法做"。 */
+  function auditBadge(item) {
+    return item.verify === 'unverified'
+      ? '<span class="qb-tag qb-tag-audit" title="语料题：还没通过答案验证，只能看/复盘，不进每日一练">未审核</span>'
+      : '';
   }
 
   /* ---------------------------------------------------------------- 侧栏栏目 */
@@ -257,7 +270,7 @@
 
   function cardHtml(item) {
     return '<a class="qb-card" href="#/q/' + encodeURIComponent(item.qid) + '">' +
-      '<div class="qb-card-top">' + stateBadge(item) + diffHtmlOf(item) + '</div>' +
+      '<div class="qb-card-top">' + stateBadge(item) + auditBadge(item) + diffHtmlOf(item) + '</div>' +
       // 卡片里**渲染**题面（公式用 KaTeX），高度由 CSS 夹住；悬停给纯文本预览。
       // 为什么不是"只给一行纯文本"：那道行列式题去掉公式后 48 张卡长得一模一样，卡片就废了。
       '<div class="qb-card-stem" title="' + esc(preview(item.stem || item.qid)) + '">' +
@@ -301,6 +314,7 @@
     /* 题面卡：**没做过也完整给** —— 题目本身不是答案 */
     html += '<div class="card qb-question">' +
       '<div class="qb-q-top">' + diffHtmlOf(q) +
+        auditBadge(q) +
         '<span class="qb-meta">类型 ' + esc(q.type || '—') + ' · 判定 ' + esc(q.answerType || '—') + '</span>' +
         '<span class="qb-meta">' + esc(shortSource(q.source)) + '</span>' +
       '</div>' +

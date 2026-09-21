@@ -26,12 +26,13 @@ from contracts.answer_types import Verdict
 
 __all__ = ["ConflictError", "Store", "SCHEMA_VERSION"]
 
-#: 2 = 加 `agent_notes` 表（ADR-017）；3 = 加 `agent_difficulty` 表（ADR-018）。
+#: 2 = 加 `agent_notes` 表（ADR-017）；3 = 加 `agent_difficulty` 表（ADR-018）；
+#: 4 = 加 `question_provenance` 旁表（ADR-019，语料题出处/题号来源/验证状态）。
 #: **注意迁移现状**：本文件的 schema 变更至今
 #: **全是"加表"**，靠 `CREATE TABLE IF NOT EXISTS` 每次启动幂等地补上；**没有**真正的
 #: 步进迁移（加列/改类型没有机制）。故 `ensure_schema` 允许把已记录的版本号**前推**
 #: （见其 docstring）；哪天要加列，必须先补步进迁移，不许再靠这一手。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: §3.5 的合并规则（真值副本在 contracts/blob_merge.md；两处不一致以那份为准）
 MERGE_RULES = {
@@ -109,6 +110,21 @@ CREATE TABLE IF NOT EXISTS agent_difficulty (
     ts         REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_difficulty_qid ON agent_difficulty(qid, id);
+CREATE TABLE IF NOT EXISTS question_provenance (
+    qid               TEXT PRIMARY KEY,
+    bank              TEXT    NOT NULL,
+    book_title        TEXT,
+    page_idx          INTEGER,
+    bbox              TEXT,
+    blocks            TEXT,
+    number_source     TEXT    NOT NULL,
+    number_evidence   TEXT,
+    verify            TEXT    NOT NULL,
+    segment_schema    INTEGER NOT NULL,
+    whitelist_version TEXT,
+    created_at        REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_question_provenance_verify ON question_provenance(verify);
 """
 
 
@@ -408,6 +424,66 @@ class Store:
     def question_count(self) -> int:
         with self._lock:
             return int(self.conn.execute("SELECT COUNT(*) AS c FROM questions").fetchone()["c"])
+
+    # ------------------------------------------------------------ 语料出处（ADR-019）
+    def record_provenance(self, rows: list[dict]) -> int:
+        """写入语料题出处（旁表，幂等 upsert）。`questions` 表**不加列**（ADR-019 决策 1）。"""
+        n = 0
+        with self._lock:
+            for r in rows:
+                self.conn.execute(
+                    "INSERT INTO question_provenance(qid, bank, book_title, page_idx, bbox, blocks,"
+                    " number_source, number_evidence, verify, segment_schema, whitelist_version, created_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(qid) DO UPDATE SET bank=excluded.bank, book_title=excluded.book_title,"
+                    " page_idx=excluded.page_idx, bbox=excluded.bbox, blocks=excluded.blocks,"
+                    " number_source=excluded.number_source, number_evidence=excluded.number_evidence,"
+                    " verify=excluded.verify, segment_schema=excluded.segment_schema,"
+                    " whitelist_version=excluded.whitelist_version",
+                    (r["qid"], r["bank"], r.get("book_title"), r.get("page_idx"), r.get("bbox"),
+                     r.get("blocks"), r["number_source"], r.get("number_evidence"), r["verify"],
+                     r["segment_schema"], r.get("whitelist_version"), time.time()),
+                )
+                n += 1
+            self.conn.commit()
+            return n
+
+    def list_provenance(self, *, qid: str | None = None) -> list[dict]:
+        sql = ("SELECT qid, bank, book_title, page_idx, bbox, blocks, number_source,"
+               " number_evidence, verify, segment_schema, whitelist_version FROM question_provenance")
+        args: tuple = ()
+        if qid:
+            sql += " WHERE qid = ?"
+            args = (qid,)
+        with self._lock:
+            return [dict(r) for r in self.conn.execute(sql + " ORDER BY qid", args).fetchall()]
+
+    def practice_pool(self) -> list[dict]:
+        """**练习池**：排除 `verify='unverified'` 的语料题（ADR-019 决策 4 / DATA_PIPELINE §2）。
+
+        没有 provenance 行的题（生成器自产）视为 `auto_verified` ⇒ 照旧进池。
+        为什么不改 `list_questions()`：那个方法还有别的调用方（题库栏目要**看得见**未审核的题），
+        两件事必须分开 —— "看得见"与"能拿来练"是两条不同的门。
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT q.id, q.kid, q.type, q.answer_type, q.stem, q.options, q.answer, q.analysis,"
+                " q.difficulty, q.source FROM questions q"
+                " LEFT JOIN question_provenance p ON p.qid = q.id"
+                " WHERE COALESCE(p.verify, 'auto_verified') != 'unverified'"
+                " ORDER BY q.id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def verify_map(self) -> dict[str, str]:
+        """qid → 验证状态（没有旁表行的生成器题视为 `auto_verified`）。
+
+        为什么要单独一个方法：题库栏目要**在界面上标出"未审核"**（ADR-019 代价 3）——
+        这些题看得见、点得开，但**不进每日一练**，用户必须能一眼看出区别。
+        """
+        with self._lock:
+            rows = self.conn.execute("SELECT qid, verify FROM question_provenance").fetchall()
+        return {r["qid"]: r["verify"] for r in rows}
 
     def list_questions(self) -> list[dict]:
         """按 id 排序返回全部题目（题库视图；给 bridge 的 /api/daily 用）。"""

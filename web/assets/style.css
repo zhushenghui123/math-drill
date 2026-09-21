@@ -1169,6 +1169,7 @@ body {
   font-size: 10.5px; padding: 0 5px; border-radius: var(--radius-sm);
   border: 1px solid var(--brand-line); background: var(--brand-soft); color: var(--brand);
 }
+.qb-diff-none { color: var(--ink-3); font-size: 11px; }
 .qb-diff-note {
   margin-bottom: 12px; padding: 7px 10px; font-size: 12px; line-height: 1.7;
   color: var(--ink-2); background: var(--sunken); border-radius: var(--radius-sm);
@@ -1180,6 +1181,7 @@ body {
 .qb-tag-new { color: var(--ink-3); }
 .qb-tag-ok { border-color: var(--green-line); background: var(--green-soft); color: var(--green); }
 .qb-tag-bad { border-color: var(--red-line); background: var(--red-soft); color: var(--red); }
+.qb-tag-audit { border-color: var(--amber-line); background: var(--amber-soft); color: var(--amber); }
 
 /* 详情页 */
 .qb-question { padding: 20px 22px; }

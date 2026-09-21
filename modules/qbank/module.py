@@ -91,6 +91,11 @@ def _difficulty_index(store) -> dict[str, dict]:
     return store.latest_difficulties()
 
 
+def _verify_index(store) -> dict[str, str]:
+    """qid → 验证状态（ADR-019）。没有旁表行的生成器题 = `auto_verified`（能进练习池）。"""
+    return store.verify_map()
+
+
 def _difficulty_fields(qid: str, base, adiff: dict[str, dict]) -> dict:
     """难度的三个字段：生效值 / 题库原生 / 来源。UI 只认 `difficulty`，另两个用来说明。"""
     row = adiff.get(qid)
@@ -151,6 +156,7 @@ def _list(store, payload: dict) -> dict:
     stats = _attempt_index(store)
     notes = _note_index(store)
     adiff = _difficulty_index(store)
+    vmap = _verify_index(store)
 
     items: list[dict] = []
     buckets: dict[str, dict] = {}
@@ -207,6 +213,8 @@ def _list(store, payload: dict) -> dict:
             "correct": n_ok,
             "lastDay": _day(st["last_ts"]) if st else None,
             "hasNote": q["id"] in notes,
+            # ADR-019：`unverified` 的语料题**看得见、不能练** —— 界面必须标出来
+            "verify": vmap.get(q["id"], "auto_verified"),
             "source": q.get("source"),
         })
 
@@ -283,6 +291,7 @@ def _detail(store, payload: dict) -> dict:
     attempts = store.list_attempts(qid=qid)
     notes = store.list_notes(qid=qid)
     adiff = _difficulty_index(store)
+    vmap = _verify_index(store)
 
     return {
         "schemaVersion": 1,
@@ -298,6 +307,7 @@ def _detail(store, payload: dict) -> dict:
             "stem": q.get("stem"),
             "options": q.get("options"),
             "source": q.get("source"),
+            "verify": vmap.get(q["id"], "auto_verified"),
         },
         # 作答史：只回**日粒度** + 判决，不回秒级时间戳（与 /api/attempts 同口径）
         "attempts": [
