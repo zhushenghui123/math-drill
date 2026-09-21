@@ -154,6 +154,16 @@ console.log('\n=== web/js/api.js 存储桥 ===');
        /done=false/.test(calls[0].url));
   }
   {
+    // 回归（2026-09-21 实测抓到的 bug）：**chapter（题目类型）必须真的拼进查询串**。
+    // 曾经这里逐条 if 拼参数、漏了 chapter ⇒ 点「矩阵」发出去的是"整个线性代数"，
+    // 空类型打开后显示的是行列式的题。现在改为 opts 全量透传，这条断言盯着它。
+    const { win, calls } = makeEnv();
+    win.__responses.push({ status: 200, body: { subjects: [], groups: [], items: [], counts: {} } });
+    await win.MDStore.qbankList({ subject: 'linear', chapter: '第九章 矩阵', limit: 80 });
+    ok('qbankList() 把 chapter 也带上（空类型才不会串到别的类型）',
+       calls[0].url.indexOf('chapter=' + encodeURIComponent('第九章 矩阵')) > 0, calls[0].url);
+  }
+  {
     const { win, calls } = makeEnv();
     win.__responses.push({ status: 200, body: { question: { qid: 'q1' } } });
     await win.MDStore.qbankDetail('imp.tjq1.s1-6.q1-3');

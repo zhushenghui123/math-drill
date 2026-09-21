@@ -208,10 +208,15 @@
     qbankList: function (opts) {
       opts = opts || {};
       var qs = [];
-      if (opts.subject) qs.push('subject=' + encodeURIComponent(opts.subject));
-      if (opts.kid) qs.push('kid=' + encodeURIComponent(opts.kid));
-      if (opts.done !== undefined && opts.done !== null) qs.push('done=' + (opts.done ? 'true' : 'false'));
-      if (opts.limit) qs.push('limit=' + encodeURIComponent(opts.limit));
+      // ⚠️ **不写死参数白名单**：调用的 opts 全量透传。曾经这里逐条 if 拼参数，
+      // 服务端加了 `chapter`（题目类型）过滤而这里忘了加 ⇒ 点「矩阵」发出去的还是
+      // "整个线性代数"，页面显示的是行列式的题（2026-09-21 决策人实测抓到）。
+      // 透传后：服务端支持什么就传什么，漏参数这件事从"靠记性"变成"不会发生"。
+      Object.keys(opts).forEach(function (k) {
+        var v = opts[k];
+        if (v === undefined || v === null || v === '') return;
+        qs.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
+      });
       return moduleGet('/m/qbank/list', qs, '题库载入失败');
     },
 

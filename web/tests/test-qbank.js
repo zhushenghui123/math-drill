@@ -78,6 +78,8 @@ console.log('\n=== web/js/qbank.js 题库浏览 ===');
      !!(qb && qb.pageSubject && qb.pageChapter && qb.pageQuestion && qb.loadSubjects));
   ok('栏目页按服务端的 groups（题目类型）渲染，不在前端自己分组',
      /d\.groups/.test(qbankSrc) && !/subject\s*===?\s*'linear'/.test(qbankSrc));
+  ok('类型页把 chapter 传给服务端（漏了这一步 = 空类型会串到别的类型）',
+     /qbankList\(\{\s*subject:\s*subject,\s*chapter:\s*chapter/.test(qbankSrc));
   ok('难度来源标记：agent 评过的题要标出来', /difficultySource === 'agent'/.test(qbankSrc)
      && /agent 评/.test(qbankSrc));
   ok('学科中文名从知识树取（不在 qbank.js 里另立一套）',
