@@ -34,7 +34,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from scripts.segment_ab import DEFAULT_BASE, DEFAULT_MODEL, ask_model  # noqa: E402
+from scripts.segment_ab import (DEFAULT_BASE, DEFAULT_MODEL, PROMPT as AB_PROMPT,  # noqa: E402
+                                SCHEMA as AB_SCHEMA, _render, ask_model)
 from scripts.segment_corpus import PROFILES, _block_text, _iter_blocks  # noqa: E402
 
 __all__ = ["SCHEMA_VERSION", "WHITELIST_VERSION", "loose_anchors", "main"]
@@ -51,6 +52,11 @@ NON_QUESTION_TYPES = {"header", "footer", "page_number", "doc_title", "page_foot
 
 #: 「§ N. <标题>」起头的知识点正文段（复核给出、我复跑 4/4）
 SECTION_BODY = re.compile(r"^\s*§\s*\d+\s*\.")
+
+#: 逐章重算的书（`【N.M】`）专用 schema：题号是**标签（字符串）**，不是整数。
+SCHEMA_SCOPED = json.loads(json.dumps(AB_SCHEMA))
+SCHEMA_SCOPED["properties"]["questions"]["items"]["properties"]["number"] = {
+    "type": "string", "description": "题号标签，形如 1.1（第几章第几题型。题序）"}
 
 #: 题型标题行：`paragraph_title` 且不以 `N.` / `(N)` 开头（如「基本题型」「有理函数的积分」）
 TOPIC_TITLE_TAIL = re.compile(r"^\s*[(（]?\d")
@@ -88,8 +94,14 @@ def anchor_spans(text: str) -> list[tuple[int, int, int, str, str]]:
     return sorted(uniq, key=lambda t: t[0])
 
 
-def loose_anchors(text: str) -> list[tuple[int, str, str]]:
-    """`anchor_spans` 的瘦身版：`[(题号, 原始串, 来源)]`。"""
+def loose_anchors(text: str, profile: dict | None = None) -> list[tuple]:
+    """`anchor_spans` 的瘦身版：`[(题号, 原始串, 来源)]`。
+
+    `profile["number_kind"] == "chapter_scoped"` 时（吉米概率 `【N.M】` 逐章重算）：
+    题号是**标签（字符串）**、来源恒 `ocr`（不做形态容错，因为**邻号对账不成立** ⇒ 讹变只能交人工）。
+    """
+    if profile and profile.get("number_kind") == "chapter_scoped":
+        return [(m.group(1), m.group(0), "ocr") for m in profile["anchor"].finditer(text)]
     return [(n, raw, kind) for _, _, n, raw, kind in anchor_spans(text)]
 
 
@@ -140,9 +152,9 @@ def load_blocks(corpus: Path, book: str, lo: int, hi: int) -> tuple[list[dict], 
     return blocks, src
 
 
-def anchor_windows(blocks: list[dict], per_window: int) -> list[list[dict]]:
+def anchor_windows(blocks: list[dict], per_window: int, profile: dict | None = None) -> list[list[dict]]:
     """窗口边界对齐到"带锚点的块" —— 保证一道题不被窗口劈开（机械职责）。"""
-    starts = [i for i, b in enumerate(blocks) if loose_anchors(b["text"])]
+    starts = [i for i, b in enumerate(blocks) if loose_anchors(b["text"], profile)]
     if not starts:
         return [blocks]
     out = []
@@ -153,7 +165,7 @@ def anchor_windows(blocks: list[dict], per_window: int) -> list[list[dict]]:
     return out
 
 
-def reconcile(anchors: list[dict]) -> list[dict]:
+def reconcile(anchors: list[dict], *, global_numbering: bool = True) -> list[dict]:
     """**位置对账**：`corrupted` 位不靠"自己解析出的数"定题号，而靠**邻号间隙**反推。
 
     为什么不能信自己解析出来的数（实测教训）：`【1:26】` 按"冒号拼接"得 **126**，
@@ -168,6 +180,13 @@ def reconcile(anchors: list[dict]) -> list[dict]:
     别的书（`【N.M】` 逐章重算 / `习题 N + (N)` 章内连号）一律 `needs_human`。
     """
     anchors = sorted(anchors, key=lambda a: a["gid"])
+    if not global_numbering:
+        # 逐章重算的书（【N.M】）：**邻号不是同一个序列** ⇒ 一律不做自动修回，
+        # 形态可疑的交人工（ADR-019 / 契约 §4 写死的那条约束）。
+        for a in anchors:
+            a["status"] = "ok"
+            a.setdefault("parsed_value", a["number"])
+        return anchors
     for i, a in enumerate(anchors):
         a["status"] = "ok" if a["source"] == "ocr" else "unreconciled"
         a.setdefault("parsed_value", a["number"])
@@ -189,12 +208,20 @@ def coverage(blocks: list[dict], questions: list[dict]) -> dict:
     返回 `{unassigned: [...], non_question: n, assigned: n, overlaps: [...]}`。
     ⚠️ 顺序要求：本函数只看块类型与正则 —— 模型给的一切（`questions[]` 的块号）都要先过合法性校验。
     """
+    # 边界共享是**合法**的：很多块同时含"上一题的解答尾巴 + 下一题的题号"（OCR 把两段并进一块）。
+    # 判据用**阅读顺序上的相邻**（相邻题共享边界块 = 正常；不相邻却共享 = 真重叠，必须报）。
+    ordered = sorted(questions, key=lambda q: min(q["_stem_gids"] or [10 ** 9]))
+    adjacent = {frozenset((ordered[i]["qid"], ordered[i + 1]["qid"])) for i in range(len(ordered) - 1)}
     assign: dict[int, str] = {}
-    overlaps = []
+    overlaps, boundary = [], 0
     for q in questions:
         for gid in q["_stem_gids"] + q["_solution_gids"]:
             if gid in assign:
-                overlaps.append({"gid": gid, "between": [assign[gid], q["qid"]]})
+                pair = frozenset((assign[gid], q["qid"]))
+                if pair in adjacent:
+                    boundary += 1
+                else:
+                    overlaps.append({"gid": gid, "between": [assign[gid], q["qid"]]})
                 continue
             assign[gid] = q["qid"]
 
@@ -225,7 +252,7 @@ def coverage(blocks: list[dict], questions: list[dict]) -> dict:
         unassigned.append({"gid": gid, "page": b["page"], "idx": b["idx"],
                            "type": b["type"], "head": text[:80]})
     return {"unassigned": unassigned, "non_question": non_question,
-            "assigned": len(assign), "overlaps": overlaps}
+            "assigned": len(assign), "overlaps": overlaps, "boundary_shared": boundary}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,13 +276,16 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     lo, hi = (int(x) for x in args.pages.split("-"))
+    profile = PROFILES[args.book]
+    scoped = profile.get("number_kind") == "chapter_scoped"
     blocks, src = load_blocks(Path(args.corpus).expanduser(), args.book, lo, hi)
     anchors = reconcile([
-        {"gid": b["gid"], "page": b["page"], "idx": b["idx"], "number": n,
+        {"gid": b["gid"], "page": b["page"], "idx": b["idx"], "number": n, "seq": k + 1,
          "raw": raw, "source": kind}
-        for b in blocks for (n, raw, kind) in loose_anchors(b["text"])
-    ])
-    windows = anchor_windows(blocks, args.q_per_window)
+        for k, (b, n, raw, kind) in enumerate(
+            (b, *a) for b in blocks for a in loose_anchors(b["text"], profile))
+    ], global_numbering=not scoped)
+    windows = anchor_windows(blocks, args.q_per_window, profile)
     print(f"{args.book} page_idx {lo}-{hi}：{len(blocks)} 块 · {len(anchors)} 个锚点"
           f"（ocr {sum(1 for a in anchors if a['source'] == 'ocr')} / "
           f"corrupted {sum(1 for a in anchors if a['source'] == 'corrupted')}）· {len(windows)} 个窗口")
@@ -278,9 +308,15 @@ def main(argv: list[str] | None = None) -> int:
         for line in partial.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 q = json.loads(line)
+                q["number"] = str(q["number"])        # 归一化（老 partial 里混着 float）
                 questions.append(q)
                 done_numbers.add(q["number"])
-        print(f"  续跑：已从 {partial.name} 读回 {len(questions)} 题")
+        # **按 qid 去重**（keep last）：逐章重算的书标签会跨章重复，重复追加过一次（实测 1139 题 vs 606 锚点）
+        uniq: dict[str, dict] = {}
+        for q in questions:
+            uniq[q["qid"]] = q
+        questions = list(uniq.values())
+        print(f"  续跑：已从 {partial.name} 读回 {len(questions)} 题（按 qid 去重后）")
     if args.no_model:
         # 纯机械对照：题干 = 锚点块，解答 = 到下一个锚点前的所有块（就是 A 组的做法，用来对比校验器的读数）
         for i, a in enumerate(anchors):
@@ -300,15 +336,28 @@ def main(argv: list[str] | None = None) -> int:
         write_lock = threading.Lock()
 
         def do_window(i: int, win: list[dict]) -> tuple[int, int, int]:
-            out = ask_model(base=args.base_url, key=key, model=args.model, blocks=win,
-                            max_output_tokens=args.max_output_tokens)
+            if scoped:      # 逐章重算：题号是标签 ⇒ 换 schema，并在提示里把"形如【12】"改掉
+                text = AB_PROMPT.replace("__BLOCKS__", _render(win)).replace(
+                    "题号是多少（形如【12】的 N", "题号标签是多少（形如【1.1】的 N.M")
+                out = ask_model(base=args.base_url, key=key, model=args.model,
+                                max_output_tokens=args.max_output_tokens,
+                                input_text=text, schema=SCHEMA_SCOPED)
+            else:
+                out = ask_model(base=args.base_url, key=key, model=args.model, blocks=win,
+                                max_output_tokens=args.max_output_tokens)
             made = 0
             for q in out["parsed"].get("questions", []):
+                # ⚠️ 这个网关**不强制** schema：逐章重算的书明明要的是字符串标签，
+                # 模型偶尔仍回 JSON 数字（`1.1`）⇒ 类型会在最后排序时炸（实测跑到第 60 窗才崩）。
+                # 统一成字符串，并在匹配锚点时也按字符串比。
+                num = str(q["number"]) if scoped else q["number"]
                 stem = [g for g in q["stem_block_ids"] if g in by_gid]
                 sol = [g for g in q["solution_block_ids"] if g in by_gid]
-                a = next((x for x in anchors if x["number"] == q["number"] and x["gid"] in stem), None)
+                a = next((x for x in anchors if str(x["number"]) == str(num) and x["gid"] in stem), None)
+                qid = (f"imp.{args.book}.s{a['seq']:04d}" if (scoped and a)
+                       else f"imp.{args.book}.q{num}")
                 item = {
-                    "qid": f"imp.{args.book}.q{q['number']}", "number": q["number"],
+                    "qid": qid, "number": num,
                     "_stem_gids": stem, "_solution_gids": sol,
                     "number_source": a["source"] if a else "inferred",
                     "number_evidence": ({"raw": a["raw"], "span": [a["page"], a["idx"]],
@@ -331,8 +380,11 @@ def main(argv: list[str] | None = None) -> int:
 
         todo = []
         for i, win in enumerate(windows):
-            nums = {n for b in win for (n, _, _) in loose_anchors(b["text"])}
-            if args.resume and nums and nums <= done_numbers:
+            # ⚠️ 完成判据必须用**块号覆盖**，不能用题号 ——
+            # `【N.M】` 是逐章重算的（标签跨章重复），拿题号判断会把已完成的窗口全部重跑并重复追加（实测踩过）。
+            win_gids = {b["gid"] for b in win if loose_anchors(b["text"], profile)}
+            covered = {g for q in questions for g in q["_stem_gids"]}
+            if args.resume and win_gids and win_gids <= covered:
                 print(f"  窗口 {i + 1}/{len(windows)}：已完成，跳过", flush=True)
                 continue
             todo.append((i, win))
@@ -354,7 +406,8 @@ def main(argv: list[str] | None = None) -> int:
                               flush=True)
         print(f"  并发 {args.concurrency}：成功 {ok} 窗 · 失败 {failed} 窗", flush=True)
 
-    questions.sort(key=lambda q: (q["number"], min(q["_stem_gids"] or [10 ** 9])))
+    # 排序键统一成字符串（上面已经把 number 归一化，这里再兜一层 —— 排序崩一次代价是整轮重跑）
+    questions.sort(key=lambda q: (str(q["number"]), min(q["_stem_gids"] or [10 ** 9])))
     for q in questions:
         q["stem"] = "".join(by_gid[g]["text"] for g in q["_stem_gids"])
         q["solution"] = "".join(by_gid[g]["text"] for g in q["_solution_gids"])
@@ -379,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
         "non_question_blocks": cov["non_question"],
         "assigned_blocks": cov["assigned"],
         "overlaps": cov["overlaps"][:20],
+        "boundary_shared_blocks": cov["boundary_shared"],
         "bad_block_ids": bad_ids[:20],
         "anchor_in_solution": sum(1 for q in questions if "anchor_in_solution" in q["flags"]),
         "no_solution": sum(1 for q in questions if "no_solution" in q["flags"]),
@@ -398,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  题数 {len(questions)} · 覆盖对账：已归属 {cov['assigned']} 块 / 非题目区 {cov['non_question']} 块 / "
           f"**未归属 {len(cov['unassigned'])} 块**")
     print(f"  规则读数：解答含锚点 {report['anchor_in_solution']} · 无解答 {report['no_solution']} · "
-          f"非法块号 {len(bad_ids)} · 重叠 {len(cov['overlaps'])}")
+          f"非法块号 {len(bad_ids)} · 重叠 {len(cov['overlaps'])} · 边界共享 {cov['boundary_shared']}")
     print(f"  题号来源：{report['number_source_counts']}")
     print(f"  白名单版本 {WHITELIST_VERSION} · token {usage_total}")
     if cov["unassigned"]:

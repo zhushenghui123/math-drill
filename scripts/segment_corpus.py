@@ -55,6 +55,18 @@ PROFILES: dict[str, dict] = {
         "known_gaps": [49, 50, 208, 434, 550, 884, 907, 1126, 1197],
         "known_duplicates": [206, 1297],
     },
+    # 吉米多维奇 概率：`【N.M】` = 题型号.题序，**每章每题型重新起算**（实测全书 606 次出现）。
+    # ⇒ ① 单看数字一定撞车；② **邻号对账不成立**（"N−1/N+1"在不同章里不是同一个序列）。
+    "jmdw-gailv": {
+        "dir": "jmdw-gailv-吉米多维奇概率论与数理统计习题精选精解",
+        "title": "吉米多维奇 概率论与数理统计习题精选精解",
+        "anchor": re.compile(r"【(\d{1,3}\.\d{1,3})】"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",   # 逐章重算 ⇒ 题号是**标签**不是序号；qid 用阅读序
+        "expect_max": None,
+        "known_gaps": [],
+        "known_duplicates": [],
+    },
 }
 
 
