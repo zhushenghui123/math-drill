@@ -9,8 +9,14 @@
  *      的分支 —— 别自己造一个，那正是 ADR-017 决策 3 要挡的东西。
  *
  * 数据形态（服务端 `modules/qbank/module.py`）：
- *   list   → {subjects:[{id,total,done,mastered,coverage,score,accuracy}], items:[…], counts}
+ *   list   → {subjects:[…], groups:[题目类型=章], items:[…], counts}
  *   detail → {question:{…}, attempts:[{day,verdict,correct}], done, correct, notes:[…]}
+ *
+ * 两级导航：`#/s/<学科>` 先给**题目类型**（知识树里的章：行列式 / 矩阵 / 特征值与相似…），
+ * 点进去才是 `#/s/<学科>/<章>` 的题卡墙 —— 决策人 2026-09-21 要求。
+ *
+ * 难度有两条来源（ADR-018）：`difficulty` 是**生效值**（agent 判过就以它为准），
+ * `difficultyBase` 是题库原生。界面上生效值照常显示，来源是 agent 时补一个「agent 评」标记。
  */
 (function (root) {
   'use strict';
@@ -79,6 +85,17 @@
       '<b>' + stars(k) + '</b> ' + esc(DIFF_LABEL[k] || '') + '</span>';
   }
 
+  /* 难度：生效值 + 来源标记。agent 评过的，把题库原生值放在 title 里做对照。 */
+  function diffHtmlOf(item) {
+    var html = diffHtml(item.difficulty);
+    if (item.difficultySource === 'agent') {
+      var base = (item.difficultyBase === null || item.difficultyBase === undefined)
+        ? '题库没标' : ('题库原生 ' + item.difficultyBase + '/4');
+      html += '<span class="qb-diff-by" title="这是 agent 判定的难度（' + esc(base) + '）">agent 评</span>';
+    }
+    return '<span class="qb-diff-wrap">' + html + '</span>';
+  }
+
   function stateBadge(item) {
     if (!item.done) return '<span class="qb-tag qb-tag-new">未做</span>';
     if (item.correct > 0) return '<span class="qb-tag qb-tag-ok">做对过</span>';
@@ -109,7 +126,9 @@
     var items = document.querySelectorAll('.nav-item');
     for (var i = 0; i < items.length; i++) {
       var a = items[i];
-      if (a.getAttribute('data-route') === route) a.classList.add('active');
+      var r = a.getAttribute('data-route') || '';
+      // 前缀也算命中：在 `#/s/linear/第八章 行列式` 里，「线性代数」这一项要保持高亮
+      if (r === route || (route.indexOf('/s/') === 0 && r.indexOf(route + '/') === 0)) a.classList.add('active');
       else a.classList.remove('active');
     }
   }
@@ -137,32 +156,22 @@
       (hint ? '<div class="qb-w-hint">' + esc(hint) + '</div>' : '') + '</div>';
   }
 
+  /* ---------------------------------------------------------------- 栏目页：先给题目类型 */
+
   function pageSubject(subject) {
     var host = main();
     host.innerHTML = shell().head(subjectName(subject), '载入题库…');
-    api().qbankList({ subject: subject, limit: NAV_LIMIT }).then(function (d) {
-      var s = (d.subjects || []).filter(function (x) { return x.id === subject; })[0] ||
-              { total: 0, done: 0, mastered: 0, coverage: 0, score: 0, accuracy: 0, attempts: 0 };
-      var items = d.items || [];
+    api().qbankList({ subject: subject, limit: 1 }).then(function (d) {
       // 侧栏/其它页可能还没拉过 subjects（例如直接开链接进来）—— 顺手补上
       if (!subjectsCache) { subjectsCache = d.subjects || []; fillNav(subjectsCache); }
+      var s = pickSubject(d.subjects, subject, d.groups);
+      var groups = (d.groups || []).filter(hasChapter);
       var html = shell().head(subjectName(subject),
-        '共 ' + s.total + ' 题 · 做过 ' + s.done + ' 题 · 本页 ' + items.length + ' 张卡片');
-
-      html += '<div class="qb-widgets">' +
-        widget('完成度', s.coverage, '%', '做过的题 ÷ 总题数') +
-        widget('综合评分', s.score, '%', '做对过的题 ÷ 总题数') +
-        widget('题量', s.total, ' 题', '该栏目现有题目') +
-        widget('做题正确率', s.accuracy, '%', '累计 ' + s.attempts + ' 次作答') +
-        '</div>';
-
-      if (!items.length) {
-        html += '<div class="card mt16"><div class="card-title">这个栏目还没有题</div>' +
-          '<div style="color:var(--ink-3);font-size:13px;line-height:1.7">' +
-          '数据提炼跑完、题目灌进 <code>questions</code> 表之后，这里会自动出现卡片。</div></div>';
-      } else {
-        html += '<div class="qb-grid">' + items.map(cardHtml).join('') + '</div>';
-      }
+        '共 ' + s.total + ' 题 · ' + groups.length + ' 个题目类型');
+      html += widgetRow(s);
+      html += '<div class="qb-sec-title">题目类型' +
+        '<span class="sub">点一个类型进去看它的全部题目</span></div>';
+      html += '<div class="qb-type-grid">' + groups.map(typeCard).join('') + '</div>';
       host.innerHTML = html;
       setNavActive('/s/' + subject);
     }).catch(function (e) {
@@ -170,9 +179,85 @@
     });
   }
 
+  function hasChapter(g) { return !!(g && g.chapter); }
+
+  function pickSubject(subjects, subject, groups) {
+    var hit = (subjects || []).filter(function (x) { return x.id === subject; })[0];
+    if (hit) return hit;
+    // 兜底：subjects 里没有（比如 kp 还没分类）就从 groups 现算，免得页面崩
+    var total = 0, done = 0, mastered = 0;
+    (groups || []).forEach(function (g) { total += g.total; done += g.done; mastered += g.mastered; });
+    var pct = function (n, d2) { return d2 ? Math.round(100 * n / d2) : 0; };
+    return { total: total, done: done, mastered: mastered, attempts: 0,
+             coverage: pct(done, total), score: pct(mastered, total), accuracy: 0 };
+  }
+
+  function widgetRow(s) {
+    return '<div class="qb-widgets">' +
+      widget('完成度', s.coverage, '%', '做过的题 ÷ 总题数') +
+      widget('综合评分', s.score, '%', '做对过的题 ÷ 总题数') +
+      widget('题量', s.total, ' 题', '该栏目现有题目') +
+      widget('做题正确率', s.accuracy, '%', '累计 ' + s.attempts + ' 次作答') +
+      '</div>';
+  }
+
+  /* 一个「题目类型」= 知识树里的一章（行列式 / 矩阵 / 向量组 …）。
+     零题的章也照常显示 —— 它们是"这个学科还有哪些类型"的地图，也是数据提炼的待办清单。 */
+  function typeCard(g) {
+    var kids = (g.kids || []).filter(function (k) { return k.total > 0; });
+    var href = '#/s/' + encodeURIComponent(g.subject) + '/' + encodeURIComponent(g.chapter);
+    var body = g.total
+      ? '<div class="qb-type-metrics">' +
+          '<span><b>' + g.total + '</b> 题</span>' +
+          '<span>完成度 <b>' + g.coverage + '%</b></span>' +
+          '<span>评分 <b>' + g.score + '%</b></span>' +
+        '</div>' +
+        (kids.length ? '<div class="qb-type-kids">' + kids.map(function (k) {
+          return '<span class="qb-kid-chip">' + esc(k.title || k.kid) + '<i>' + k.total + '</i></span>';
+        }).join('') + '</div>' : '')
+      : '<div class="qb-type-empty">还没有题 —— 等这批数据提炼进来就会出现在这里</div>';
+    return '<a class="qb-type-card' + (g.total ? '' : ' empty') + '" href="' + href + '">' +
+      '<div class="qb-type-title">' + esc(g.chapter.replace(/^第[一二三四五六七八九十]+章\s*/, '')) +
+        '<span class="qb-type-full">' + esc(g.chapter) + '</span></div>' +
+      body + '</a>';
+  }
+
+  /* ---------------------------------------------------------------- 题目列表页（某一类型） */
+
+  function pageChapter(subject, chapter) {
+    var host = main();
+    host.innerHTML = shell().head(chapter, '载入题库…');
+    api().qbankList({ subject: subject, chapter: chapter, limit: NAV_LIMIT }).then(function (d) {
+      if (!subjectsCache) { subjectsCache = d.subjects || []; fillNav(subjectsCache); }
+      var g = (d.groups || []).filter(function (x) { return x.chapter === chapter; })[0] ||
+              { total: 0, done: 0, mastered: 0, coverage: 0, score: 0, accuracy: 0, attempts: 0 };
+      var items = d.items || [];
+      var html = shell().head(chapter,
+        '共 ' + g.total + ' 题 · 做过 ' + g.done + ' 题 · 本页 ' + items.length + ' 张卡片',
+        '<button class="btn" onclick="location.hash=\'#/s/' + encodeURIComponent(subject) + '\'">' +
+        '返回' + esc(subjectName(subject)) + '</button>');
+      html += widgetRow({
+        coverage: g.coverage, score: g.score, total: g.total,
+        // accuracy/attempts 直接取服务端算好的 —— 前端不自己推指标（两处真值就会分叉）
+        accuracy: g.accuracy || 0, attempts: g.attempts || 0,
+      });
+      if (!items.length) {
+        html += '<div class="card mt16"><div class="card-title">这个类型还没有题</div>' +
+          '<div style="color:var(--ink-3);font-size:13px;line-height:1.7">' +
+          '题库里还没有归到这个类型的题目 —— 数据提炼跑完就会自动出现在这里。</div></div>';
+      } else {
+        html += '<div class="qb-grid">' + items.map(cardHtml).join('') + '</div>';
+      }
+      host.innerHTML = html;
+      setNavActive('/s/' + subject);
+    }).catch(function (e) {
+      host.innerHTML = shell().head(chapter, '载入失败') + errorCard(e);
+    });
+  }
+
   function cardHtml(item) {
     return '<a class="qb-card" href="#/q/' + encodeURIComponent(item.qid) + '">' +
-      '<div class="qb-card-top">' + stateBadge(item) + diffHtml(item.difficulty) + '</div>' +
+      '<div class="qb-card-top">' + stateBadge(item) + diffHtmlOf(item) + '</div>' +
       // 卡片里**渲染**题面（公式用 KaTeX），高度由 CSS 夹住；悬停给纯文本预览。
       // 为什么不是"只给一行纯文本"：那道行列式题去掉公式后 48 张卡长得一模一样，卡片就废了。
       '<div class="qb-card-stem" title="' + esc(preview(item.stem || item.qid)) + '">' +
@@ -215,10 +300,19 @@
 
     /* 题面卡：**没做过也完整给** —— 题目本身不是答案 */
     html += '<div class="card qb-question">' +
-      '<div class="qb-q-top">' + diffHtml(q.difficulty) +
+      '<div class="qb-q-top">' + diffHtmlOf(q) +
         '<span class="qb-meta">类型 ' + esc(q.type || '—') + ' · 判定 ' + esc(q.answerType || '—') + '</span>' +
         '<span class="qb-meta">' + esc(shortSource(q.source)) + '</span>' +
       '</div>' +
+      (q.difficultySource === 'agent'
+        ? '<div class="qb-diff-note">难度由 agent 判定为 <b>' +
+          esc((DIFF_LABEL[q.difficulty] || '')) + '（' + esc(q.difficulty) + '/4）</b>' +
+          (q.difficultyBase === null || q.difficultyBase === undefined
+            ? '；题库里原本没标难度'
+            : '；题库原生标注是 ' + esc(q.difficultyBase) + '/4') +
+          (q.difficultyReason ? '。理由：' + esc(q.difficultyReason) : '') +
+          (q.difficultyDay ? '（' + esc(q.difficultyDay) + '）' : '') + '</div>'
+        : '') +
       '<div class="qb-q-body">' + shell().md(q.stem || '（这道题还没有题面）') + '</div>' +
     '</div>';
 
@@ -276,6 +370,7 @@
 
   root.MDQbank = {
     pageSubject: pageSubject,
+    pageChapter: pageChapter,
     pageQuestion: pageQuestion,
     loadSubjects: loadSubjects,
     fillNav: fillNav,

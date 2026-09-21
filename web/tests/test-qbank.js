@@ -58,6 +58,8 @@ console.log('\n=== web/js/qbank.js 题库浏览 ===');
        JSON.stringify(members));
   }
   ok('/s/<学科> 路由接上', /h\.match\(\/\^\\\/s\\\/\(\.\+\)\$\/\)/.test(appSrc));
+  ok('/s/<学科>/<章> 两级路由接上（先题目类型、再题目）',
+     /h\.match\(\/\^\\\/s\\\/\(\[\^\/\]\+\)\\\/\(\.\+\)\$\/\)/.test(appSrc));
   ok('/q/<题号> 路由接上', /h\.match\(\/\^\\\/q\\\/\(\.\+\)\$\/\)/.test(appSrc));
   ok('题库栏目高亮交给 qbank 自己判（不让 setActiveNav 先点亮仪表盘）',
      /if \(seg === 's' \|\| seg === 'q'\) return;/.test(appSrc));
@@ -72,8 +74,12 @@ console.log('\n=== web/js/qbank.js 题库浏览 ===');
   const ctx = vm.createContext({ window: win, document: {}, Promise, JSON, String, Math, console });
   vm.runInContext(qbankSrc, ctx, { filename: QBANK });
   const qb = win.MDQbank;
-  ok('导出面：pageSubject / pageQuestion / loadSubjects',
-     !!(qb && qb.pageSubject && qb.pageQuestion && qb.loadSubjects));
+  ok('导出面：pageSubject / pageChapter / pageQuestion / loadSubjects',
+     !!(qb && qb.pageSubject && qb.pageChapter && qb.pageQuestion && qb.loadSubjects));
+  ok('栏目页按服务端的 groups（题目类型）渲染，不在前端自己分组',
+     /d\.groups/.test(qbankSrc) && !/subject\s*===?\s*'linear'/.test(qbankSrc));
+  ok('难度来源标记：agent 评过的题要标出来', /difficultySource === 'agent'/.test(qbankSrc)
+     && /agent 评/.test(qbankSrc));
   ok('学科中文名从知识树取（不在 qbank.js 里另立一套）',
      qb.subjectName('calculus') === '高等数学' && qb.subjectName('linear') === '线性代数');
   ok('树外学科有兜底名', qb.subjectName('probability') === '概率论与数理统计');

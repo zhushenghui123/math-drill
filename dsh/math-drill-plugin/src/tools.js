@@ -16,7 +16,17 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { summarizeDaily, summarizeProgress, summarizeReview } from './summarize.js'
 
 /** 本插件注册的工具名（顺序即呈现顺序）。 */
-export const MATH_DRILL_TOOL_NAMES = ['math_drill_progress', 'math_drill_today', 'math_drill_review']
+export const MATH_DRILL_TOOL_NAMES = [
+  'math_drill_progress', 'math_drill_today', 'math_drill_review', 'math_drill_set_difficulty',
+]
+
+/**
+ * 其中**会改变服务端状态**的工具名 —— 白名单真值（ADR-018 代价 2）。
+ *
+ * ⚠️ 这两个常量是配套的：写面从"结构性没有"降级成"可枚举"以后，**这个数组就是新的护栏**，
+ * 测试里断言它恰好等于 `['math_drill_set_difficulty']`。想加第二个写工具 = 先立 ADR。
+ */
+export const MATH_DRILL_WRITE_TOOL_NAMES = ['math_drill_set_difficulty']
 
 /** 统一文本输出契约（沿用 bridge-browser 同款：一个 `{ text }` 对象 = 一个文本块）。 */
 const TEXT_OUTPUT = {
@@ -32,7 +42,7 @@ const TEXT_OUTPUT = {
  * 造两个只读工具定义（调用方用 `ctx.tools.register` 注册）。
  *
  * @param {object} options
- * @param {{ state: () => Promise<object>, daily: () => Promise<object> }} options.client - 只读客户端。
+ * @param {object} options.client - 服务客户端（读方法 + 白名单里的写方法）。
  * @returns {import('@deepseek-ai/dsh-tools').ToolDefinition[]}
  */
 export function createMathDrillTools({ client }) {
@@ -80,5 +90,34 @@ export function createMathDrillTools({ client }) {
     presentCall: () => ({ title: '复盘考研数学', kind: 'read' }),
   })
 
-  return [progress, today, review]
+  // ⚠️ 本插件**唯一**会改服务端状态的工具（ADR-018）。其余全部只读。
+  const setDifficulty = defineTool({
+    name: 'math_drill_set_difficulty',
+    description:
+      '把**你（agent）判定的题目难度**写进研数题库，之后控制台上这道题就按你写的难度显示。'
+      + '难度取值 1=入门 2=基础 3=进阶 4=挑战。'
+      + '**什么时候用**：和用户实际讨论过这道题之后 —— 你或用户觉得题库标的难度不对，再改；'
+      + '不要仅凭题面扫一眼就批量刷。**题库原生难度不会被覆盖**（服务端 append-only 留痕，'
+      + '以最后一次写入为准），所以改错了可以再改回去。'
+      + '`reason` 请写成人话（一句话说清为什么是这个难度），它会显示在题目详情里给用户看。',
+    parameters: {
+      qid: { type: 'string', description: '题号（如 lin.det.05ea473736a6）。' },
+      difficulty: { type: 'number', description: '难度：1=入门 2=基础 3=进阶 4=挑战。' },
+      reason: { type: 'string', description: '一句话理由（会显示在题目详情里）。' },
+    },
+    output: TEXT_OUTPUT,
+    async execute(args) {
+      const qid = String(args?.qid ?? '').trim()
+      const raw = Number(args?.difficulty)
+      if (!qid) throw new Error('需要 qid（题号）')
+      if (!Number.isInteger(raw) || raw < 1 || raw > 4) throw new Error('difficulty 必须是 1-4 的整数')
+      const out = await client.setDifficulty(qid, raw, args?.reason ? String(args.reason) : undefined)
+      const label = ['', '入门', '基础', '进阶', '挑战'][raw]
+      const base = out?.difficultyBase == null ? '题库原本没标难度' : `题库原生标注 ${out.difficultyBase}/4`
+      return { text: `已记下：${qid} 的难度 = ${label}（${raw}/4）—— ${base}，现在以你的判定为准。` }
+    },
+    presentCall: () => ({ title: '标注题目难度', kind: 'edit' }),
+  })
+
+  return [progress, today, review, setDifficulty]
 }

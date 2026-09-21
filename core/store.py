@@ -26,11 +26,12 @@ from contracts.answer_types import Verdict
 
 __all__ = ["ConflictError", "Store", "SCHEMA_VERSION"]
 
-#: 2 = 加 `agent_notes` 表（ADR-017）。**注意迁移现状**：本文件的 schema 变更至今
+#: 2 = 加 `agent_notes` 表（ADR-017）；3 = 加 `agent_difficulty` 表（ADR-018）。
+#: **注意迁移现状**：本文件的 schema 变更至今
 #: **全是"加表"**，靠 `CREATE TABLE IF NOT EXISTS` 每次启动幂等地补上；**没有**真正的
 #: 步进迁移（加列/改类型没有机制）。故 `ensure_schema` 允许把已记录的版本号**前推**
 #: （见其 docstring）；哪天要加列，必须先补步进迁移，不许再靠这一手。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: §3.5 的合并规则（真值副本在 contracts/blob_merge.md；两处不一致以那份为准）
 MERGE_RULES = {
@@ -98,6 +99,16 @@ CREATE TABLE IF NOT EXISTS agent_notes (
     ts         REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_notes_qid ON agent_notes(qid, id);
+CREATE TABLE IF NOT EXISTS agent_difficulty (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    qid        TEXT    NOT NULL,
+    difficulty INTEGER NOT NULL,
+    reason     TEXT,
+    author     TEXT    NOT NULL,
+    src        TEXT    NOT NULL,
+    ts         REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_difficulty_qid ON agent_difficulty(qid, id);
 """
 
 
@@ -329,6 +340,41 @@ class Store:
     def note_count(self) -> int:
         with self._lock:
             return int(self.conn.execute("SELECT COUNT(*) AS c FROM agent_notes").fetchone()["c"])
+
+    def record_difficulty(self, *, qid: str, difficulty: int, reason: str | None = None,
+                          author: str = "agent", src: str = "agent",
+                          ts: float | None = None) -> int:
+        """写入一条 **agent 判定的难度**（ADR-018）。append-only：**取最新一条为准**。
+
+        为什么不覆盖 `questions.difficulty`：题库自带难度是**数据管线**的产物（来源可溯、可重灌），
+        agent 判定是**使用中产生的标注**。两者混在一列里，重新灌库那天 agent 的判定就会被抹掉，
+        而且再也分不清"这个数字是谁说的"。所以并存两处，读取时**agent 优先**。
+        """
+        d = int(difficulty)
+        if not 1 <= d <= 4:
+            raise ValueError(f"difficulty 必须是 1-4 的整数，收到 {difficulty!r}")
+        if not qid:
+            raise ValueError("qid 不能为空")
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO agent_difficulty(qid, difficulty, reason, author, src, ts) "
+                "VALUES(?,?,?,?,?,?)",
+                (qid, d, reason, author, src, time.time() if ts is None else ts),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
+
+    def latest_difficulties(self) -> dict[str, dict]:
+        """qid → **最新一条** agent 难度（一次取全，题量级小；读取面按 id 递增覆盖）。"""
+        out: dict[str, dict] = {}
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, qid, difficulty, reason, author, src, ts "
+                "FROM agent_difficulty ORDER BY id"
+            ).fetchall()
+        for r in rows:
+            out[r["qid"]] = dict(r)
+        return out
 
     # ------------------------------------------------------------ questions / kp
     def load_questions(self, rows: list[dict]) -> int:

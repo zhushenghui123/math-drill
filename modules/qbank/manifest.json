@@ -2,8 +2,8 @@
   "name": "qbank",
   "phase": "1",
   "enabled": true,
-  "rpc": ["list", "detail"],
+  "rpc": ["list", "detail", "set_difficulty"],
   "blob_fields": [],
   "deps": ["core"],
-  "description": "题库浏览（栏目 / 题卡 / 详情）：只读聚合 questions + attempts + agent_notes + kp（ADR-017；只走 bridge 的 /m/qbank/*，不开第二个端口）"
+  "description": "题库浏览（栏目 / 分类 / 题卡 / 详情）+ agent 定难度：只读聚合 questions + attempts + agent_notes + agent_difficulty + kp；唯一写动作 = set_difficulty（ADR-017/018；只走 bridge 的 /m/qbank/*，不开第二个端口）"
 }

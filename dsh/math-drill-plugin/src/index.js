@@ -90,6 +90,14 @@ export async function apply(ctx, config) {
           throw explain(error, resolved)
         }
       },
+      // ⚠️ 唯一的写方法（ADR-018）：agent 判定的难度写回题库。其余全是读。
+      setDifficulty: async (qid, difficulty, reason) => {
+        try {
+          return await client().setDifficulty(qid, difficulty, reason)
+        } catch (error) {
+          throw explain(error, resolved)
+        }
+      },
     },
   })
 

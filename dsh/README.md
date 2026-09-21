@@ -17,11 +17,11 @@ dsh/
     ├── src/
     │   ├── index.js               # cordis 插件（宿主半边）：name / inject / Config / apply + 只读状态路由
     │   ├── credential.js          # 服务间凭据读取（0600 校验；**永不打印**）
-    │   ├── math-drill-api.js      # math-drill HTTP 客户端（**只读**：GET /api/state、/api/daily）
+    │   ├── math-drill-api.js      # math-drill HTTP 客户端（读方法 + **唯一写方法** setDifficulty，ADR-018）
     │   ├── shared/contract.js     # ★ 两半共用契约（STATE_PATH / schemaVersion / isStateResponse）
     │   ├── summarize.js           # 纯函数核（无 harness 依赖 ⇒ 仓库内可直接测）
     │   ├── client/index.ts        # 客户端半边（浏览器）：conversation.input.dock 状态条 + locale 字典
-    │   └── tools.js               # agent 面向的两个只读工具（**剥掉答案**）
+    │   └── tools.js               # agent 面向的工具（三个只读 + 一个标难度；**剥掉答案**）
     ├── build/web-platform.ts      # 平台模块表（快照；**升级宿主前必须重取**）
     ├── tsdown.config.ts           # 客户端产物构建（镜像官方 clientConfig）
     ├── tools/build-client.mjs     # 构建壳（调用本机已有 tsdown，不联网）
@@ -94,12 +94,14 @@ chmod 600 ~/.dsh/math-drill/agent-credential
 | 决策 1 形态（宿主 + 插件、引擎用现成的） | 本目录只写**接线**，不写 agent 引擎 |
 | 决策 3 桥接鉴权（Bearer + 按凭据分桶） | `src/credential.js` + `src/math-drill-api.js`（`Authorization: Bearer …`） |
 | 决策 4 代码落点 | 本目录即 `dsh/` 顶层域 |
-| 决策 5 红线（判定链路无 LLM / 不进判定路径 / 不直写库） | `src/math-drill-api.js` **只有 GET**；`src/tools.js` **剥掉答案与解析** |
+| 决策 5 红线（判定链路无 LLM / 不进判定路径 / 不直写库） | `src/tools.js` **剥掉答案与解析**；写面在 2026-09-21 被 **ADR-018 收窄成白名单** —— 见下一行 |
+| **决策 5 的例外（ADR-018）** | 写动作**只允许一个**：`setDifficulty`（给题目标难度）⇒ `src/math-drill-api.js` 的 `WRITE_METHOD_NAMES = ['setDifficulty']`，测试断言这个集合不许长大。**写作答仍不直写库**（走判定端点） |
 | 决策 6 共享纪律（优先追加型槽位） | Phase B 的 UI 半边（见下） |
 
 ## 分期（与 ADR-015 决策 2 一致）
 
-- **Phase A（已落地）**：宿主半边 —— 只读数据通路 + 两个 agent 工具（进度 / 今日题单）+ 只读状态路由。
+- **Phase A（已落地）**：宿主半边 —— 只读数据通路 + 三个 agent 只读工具（进度 / 今日题单 / 复盘）+ 只读状态路由；
+  **2026-09-21 追加一个写工具**：`math_drill_set_difficulty`（把 agent 判定的难度写回题库，控制台按它显示）。
 - **Phase B（已落地，2026-09-19/20）**：客户端半边 —— `conversation.input.dock`（**追加位**）里的状态条；
   文案走 `math-drill` locale 命名空间（zh/en 键对齐），样式只用 `--dsw-alias-*` 语义 token。
   产物是 `window.__ModuleLoader__.load({id, factory})` 包装，由 `tsdown.config.ts` 构建（镜像官方 per-package 预设，
@@ -121,7 +123,10 @@ chmod 600 ~/.dsh/math-drill/agent-credential
 
 ## 已知限制（如实登记）
 
-1. **只读**：起步期 agent 不接触数学服务的写面（ADR-015 代价 5）。写作答将来必须走判定端点，不得直写库。
+1. **写面白名单**：ADR-018 起允许**一个**写动作 = 给题目标难度（`/m/qbank/set_difficulty`，只写 `agent_difficulty` 表）。
+   **写作答仍不得直写库**（必须走判定端点，ADR-007）；**加第二个写动作必须先立 ADR**（ADR-018 代价 2/4）。
+   ⚠️ 如实登记：在那之前本目录的卖点之一是"**结构性只读**（代码里根本没有写方法）"—— 那句话**从 ADR-018 起不再成立**，
+   现在靠的是"**可枚举白名单**"+ 测试护栏，不是"不可能"。
 2. **`/api/daily` 的响应里带 `answer`/`analysis`**（服务端为前端判分准备的）——插件的工具层**剥掉**它们再进模型上下文；
    `tests/plugin.test.mjs` 有一条断言盯着这件事（红线要有机械护栏）。
 3. **部署态与仓库态会分叉**：本机装的插件读的是 `https://math.zhu2006.xyz`；服务器上的 bridge 目前仍是旧构建，

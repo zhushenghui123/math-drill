@@ -36,6 +36,10 @@ KP = [
      "subject": "calculus", "exam": "all", "related": None},
     {"id": "l1n1", "title": "行列式的性质与计算", "chapter": "第一章 行列式",
      "subject": "linear", "exam": "all", "related": None},
+    # 故意放一个**没有题**的章：栏目页要把它一起列出来（"这个学科还有哪些类型"的地图），
+    # 顺序也必须按知识树序（kp 按 id 升序）而不是章名字典序。
+    {"id": "l2n1", "title": "矩阵的运算", "chapter": "第九章 矩阵",
+     "subject": "linear", "exam": "all", "related": None},
 ]
 
 
@@ -54,10 +58,13 @@ class QBankCase(unittest.TestCase):
         return self.registry.dispatch("modules/qbank", rpc, payload, ctx=self.store)
 
     # ---- 1. 装载
-    def test_loaded_in_phase_1_with_two_rpcs(self) -> None:
+    def test_loaded_in_phase_1_with_its_rpcs(self) -> None:
         self.assertIn("modules/qbank", self.registry.loaded,
                       "qbank 必须被装载（ADR-017 把它从 P3 提前到 P1）")
-        self.assertEqual(sorted(self.registry.rpcs()["modules/qbank"]), ["detail", "list"])
+        # 两个只读 + **一个写**（set_difficulty，ADR-018）—— 写动作只有这一个，
+        # 将来再加写 rpc 必须先在 ADR 里过一遍（这里是"别偷偷加"的机械闸门）。
+        self.assertEqual(sorted(self.registry.rpcs()["modules/qbank"]),
+                         ["detail", "list", "set_difficulty"])
 
     # ---- 2. 不回答案（结构保证）
     def test_list_carries_no_answer(self) -> None:
@@ -150,6 +157,60 @@ class QBankCase(unittest.TestCase):
             self.call("detail", {})
         with self.assertRaises(KeyError):
             self.call("nope", {})
+
+    # ---- 题目类型分组（= kp 的章；零题的章也要在，且按知识树序）
+    def test_groups_are_chapters_and_keep_empty_ones(self) -> None:
+        out = self.call("list", {"subject": "linear"})
+        self.assertEqual([g["chapter"] for g in out["groups"]], ["第一章 行列式", "第九章 矩阵"],
+                         "分组 = 章，顺序 = 知识树序（不是章名字典序）")
+        self.assertEqual([g["total"] for g in out["groups"]], [1, 0], "零题的章照样列出来")
+        self.assertEqual(out["groups"][1]["kids"][0]["kid"], "l2n1")
+        self.assertEqual(out["groups"][0]["kids"][0]["title"], "行列式的性质与计算")
+
+        # 分开的两个口径：score = 做对过的题÷题量；accuracy = 答对次数÷作答次数
+        self.store.record_attempt(qid=Q2["id"], kid="l1n1",
+                                  result={"verdict": "server_false", "correct": False})
+        self.store.record_attempt(qid=Q2["id"], kid="l1n1",
+                                  result={"verdict": "server_true", "correct": True})
+        g = self.call("list", {"subject": "linear"})["groups"][0]
+        self.assertEqual((g["attempts"], g["accuracy"], g["score"], g["coverage"]),
+                         (2, 50, 100, 100))
+
+        only = self.call("list", {"subject": "linear", "chapter": "第九章 矩阵"})
+        self.assertEqual(only["items"], [], "章筛选：这个类型还没题")
+        hit = self.call("list", {"subject": "linear", "chapter": "第一章 行列式"})
+        self.assertEqual([i["qid"] for i in hit["items"]], [Q2["id"]])
+
+    # ---- agent 定难度（ADR-018）
+    def test_set_difficulty_overrides_base_and_keeps_origin(self) -> None:
+        r = self.call("set_difficulty", {"qid": Q1["id"], "difficulty": 4,
+                                         "reason": "要先配方再用夹逼", "src": "dsh"})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["difficultyBase"], 1, "返回里要能看到题库原生值做对照")
+
+        it = self.call("list", {"subject": "calculus"})["items"][0]
+        self.assertEqual((it["difficulty"], it["difficultyBase"], it["difficultySource"]), (4, 1, "agent"))
+        self.assertEqual(it["difficultyReason"], "要先配方再用夹逼")
+
+        # **最新一条为准**（append-only，不覆盖历史）
+        self.call("set_difficulty", {"qid": Q1["id"], "difficulty": 2})
+        got = self.call("detail", {"qid": Q1["id"]})["question"]
+        self.assertEqual(got["difficulty"], 2)
+        self.assertEqual(got["difficultyBase"], 1)
+        # 题库原生那一列**没被动过**（重灌题库不该抹掉 agent 的判定）
+        base = self.store.conn.execute(
+            "SELECT difficulty FROM questions WHERE id = ?", (Q1["id"],)).fetchone()[0]
+        self.assertEqual(base, 1)
+        self.assertEqual(len(self.store.latest_difficulties()), 1, "同一题只保留最新一条生效值")
+
+    def test_set_difficulty_rejects_bad_input(self) -> None:
+        for bad, why in (({"qid": Q1["id"], "difficulty": 9}, "越界"),
+                         ({"qid": Q1["id"], "difficulty": "难"}, "不是整数"),
+                         ({"qid": Q1["id"]}, "缺 difficulty")):
+            with self.assertRaises(ValueError, msg=why):
+                self.call("set_difficulty", bad)
+        with self.assertRaises(KeyError):
+            self.call("set_difficulty", {"qid": "不存在的题", "difficulty": 2})
 
 
 if __name__ == "__main__":

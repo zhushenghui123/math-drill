@@ -33,7 +33,12 @@ NODE_RE = re.compile(
     r"\{\s*id:\s*'(\w+)',\s*title:\s*'([^']*)',\s*difficulty:\s*(\d+),\s*exam:\s*('all'|\[[^\]]*\])"
 )
 CHAPTER_RE = re.compile(r"name:\s*'([^']*)'")
-CATEGORY_RE = re.compile(r"id:\s*'(calculus|linear|probability)',\s*name:\s*'([^']*)'")
+#: ⚠️ 三个分类 id 必须与 `web/js/data-knowledge.js` **逐字一致**。原来这里写的是
+#: `(calculus|linear|probability)` —— 但知识树里概率的 id 是 **`prob`**，于是第三类
+#: 一个都匹配不上：`subject` 停在 `linear` 上，**概率的 34 个考点全被算进线性代数**
+#: （2026-09-21 实测：kp 表只有 calculus 34 / linear 34，没有 prob）。
+#: 改这里之前先看 `tests/test_kp_parse.py` —— 它按真实知识树文件断言三个分类的数量。
+CATEGORY_RE = re.compile(r"id:\s*'(calculus|linear|prob)',\s*name:\s*'([^']*)'")
 
 
 def parse_kp_js(path: Path) -> list[dict]:

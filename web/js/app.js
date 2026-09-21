@@ -2920,6 +2920,11 @@
     m = h.match(/^\/cards\/(.+)$/);
     if (m) { window.__curKid = m[1]; return pageCards(m[1]); }
     // 题库浏览（ADR-017）：/s/<学科> 栏目页 · /q/<题号> 详情页
+    // 两级导航：/s/<学科> 先给「题目类型」（章），/s/<学科>/<章> 才是该类型的题卡墙
+    m = h.match(/^\/s\/([^/]+)\/(.+)$/);
+    if (m && window.MDQbank) {
+      return window.MDQbank.pageChapter(decodeURIComponent(m[1]), decodeURIComponent(m[2]));
+    }
     m = h.match(/^\/s\/(.+)$/);
     if (m && window.MDQbank) return window.MDQbank.pageSubject(decodeURIComponent(m[1]));
     m = h.match(/^\/q\/(.+)$/);

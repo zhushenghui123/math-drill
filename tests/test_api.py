@@ -473,3 +473,44 @@ class QBankSurfaceCase(ServerCase):
         self.assertTrue(body["correct"])
         self.assertIn("day", body["attempts"][0])
         self.assertNotIn("ts", body["attempts"][0])
+
+    def test_45_set_difficulty_is_gated_and_persists(self) -> None:
+        """ADR-018：**唯一的写 rpc** —— 也要过凭据门（`/m/*` 与 `/api/*` 同待遇）。"""
+        body = {"qid": QUESTION["id"], "difficulty": 4, "reason": "要用两次配方", "src": "dsh"}
+        status, out, _ = _req(self.url("/m/qbank/set_difficulty"), method="POST", body=body)
+        self.assertEqual(status, 401, "匿名不得写")
+
+        status, out, _ = _req(self.url("/m/qbank/set_difficulty"), method="POST", body=body,
+                              bearer=self.bearer)
+        self.assertEqual(status, 200, out)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["difficultyBase"], QUESTION["difficulty"])
+
+        status, body2, _ = _req(self.url("/m/qbank/detail?qid=" + QUESTION["id"]), cookie=self.cookie)
+        q = body2["question"]
+        self.assertEqual((q["difficulty"], q["difficultyBase"], q["difficultySource"]), (4, 2, "agent"))
+
+        # 题库原生那一列没被动（重灌题库不抹 agent 判定）
+        row = self.store.conn.execute("SELECT difficulty FROM questions WHERE id = ?",
+                                      (QUESTION["id"],)).fetchone()
+        self.assertEqual(row["difficulty"], QUESTION["difficulty"])
+
+    def test_46_set_difficulty_bad_params_are_400(self) -> None:
+        """模块抛 ValueError → bridge 转 **400**（没有这条映射，模块一报错连接就被掐掉）。"""
+        status, body, _ = _req(self.url("/m/qbank/set_difficulty"), method="POST",
+                               body={"qid": QUESTION["id"], "difficulty": 9}, cookie=self.cookie)
+        self.assertEqual(status, 400, body)
+        self.assertEqual(body["error"], "malformed_request")
+        status, body, _ = _req(self.url("/m/qbank/set_difficulty"), method="POST",
+                               body={"qid": "no-such-qid", "difficulty": 2}, cookie=self.cookie)
+        self.assertEqual(status, 404, body)
+        self.assertEqual(body["error"], "no_such_rpc")
+
+    def test_47_list_groups_are_chapters(self) -> None:
+        status, body, _ = _req(self.url("/m/qbank/list?subject=calculus"), cookie=self.cookie)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["groups"], "栏目页要拿到题目类型（章）分组")
+        g = body["groups"][0]
+        for f in ("chapter", "total", "done", "mastered", "coverage", "score",
+                  "accuracy", "attempts", "kids"):
+            self.assertIn(f, g)

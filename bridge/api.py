@@ -496,6 +496,12 @@ class Handler(BaseHTTPRequestHandler):
                 except KeyError as exc:
                     self._send(HTTPStatus.NOT_FOUND, {"error": "no_such_rpc", "message": str(exc)})
                     return
+                except ValueError as exc:
+                    # 模块用 ValueError 表示"入参不合法"（ADR-018 起有写 rpc，需要 400 这个档位：
+                    # 没有它，模块一抛错就没人接，连接被直接掐掉，调用方看不到任何原因）。
+                    self._send(HTTPStatus.BAD_REQUEST,
+                               {"error": ErrorCode.MALFORMED_REQUEST.value, "message": str(exc)})
+                    return
                 self._send(HTTPStatus.OK, out if isinstance(out, dict) else {"result": out})
                 return
 

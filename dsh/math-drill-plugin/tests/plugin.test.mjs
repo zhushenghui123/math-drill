@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 
-import { createMathDrillClient, MathDrillError } from '../src/math-drill-api.js'
+import { createMathDrillClient, MathDrillError, WRITE_METHOD_NAMES } from '../src/math-drill-api.js'
 import { CredentialError, readCredential } from '../src/credential.js'
 import { daysUntil, stripQuestionAnswers, summarizeBrief, summarizeDaily, summarizeProgress } from '../src/summarize.js'
 
@@ -68,8 +68,14 @@ const QUESTION_WITH_ANSWER = {
 
 // ---------------------------------------------------------------- 假上游
 
-/** 只认 Bearer 的假 math-drill（两个只读端点 + 一个写端点用来证明"不该被调用"）。 */
+/**
+ * 只认 Bearer 的假 math-drill。
+ *
+ * ⚠️ 写面白名单（ADR-018）：**只放行** `POST /m/qbank/set_difficulty`；其余任何非 GET
+ * 都记进 `writes` 并回 405 —— 测试据此证明"插件没有偷偷写别的东西"。
+ */
 function startFakeUpstream({ onWrite } = {}) {
+  const writes = []
   const server = createServer((req, res) => {
     const auth = req.headers.authorization ?? ''
     if (auth === `Bearer ${SLOW_CREDENTIAL}`) {
@@ -82,7 +88,21 @@ function startFakeUpstream({ onWrite } = {}) {
       return
     }
     if (req.method !== 'GET') {
+      if (req.method === 'POST' && req.url === '/m/qbank/set_difficulty') {
+        let raw = ''
+        req.on('data', (chunk) => { raw += chunk })
+        req.on('end', () => {
+          writes.push({ url: req.url, body: JSON.parse(raw || '{}') })
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({
+            ok: true, id: 1, qid: 'lin.det.05ea473736a6', difficulty: 4,
+            difficultySource: 'agent', difficultyBase: 3, day: '2026-09-21',
+          }))
+        })
+        return
+      }
       onWrite?.(req.method, req.url)
+      writes.push({ url: req.url, method: req.method })
       res.writeHead(405, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ error: 'method_not_allowed' }))
       return
@@ -118,7 +138,7 @@ function startFakeUpstream({ onWrite } = {}) {
   })
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
-      resolve({ server, baseUrl: `http://127.0.0.1:${server.address().port}` })
+      resolve({ server, writes, baseUrl: `http://127.0.0.1:${server.address().port}` })
     })
   })
 }
@@ -167,7 +187,7 @@ describe('凭据纪律（ADR-015 决策 3 / 规格 §3.3）', () => {
 
 // ---------------------------------------------------------------- ② 只读客户端
 
-describe('只读客户端（ADR-015 决策 5）', () => {
+describe('客户端：读方法若干 + **一个**写方法（ADR-015 决策 5 被 ADR-018 收窄）', () => {
   const client = (overrides = {}) => createMathDrillClient({
     baseUrl: upstream.baseUrl, credential: CREDENTIAL, timeoutMs: 200, ...overrides,
   })
@@ -179,8 +199,23 @@ describe('只读客户端（ADR-015 决策 5）', () => {
     assert.equal(daily.questions.length, 1)
   })
 
-  it('客户端**没有**写方法（红线：起步期不碰写面）', () => {
-    assert.deepEqual(Object.keys(client()).sort(), ['attempts', 'daily', 'kp', 'state'])
+  it('写方法集合 = 白名单（想加写方法必须先立 ADR，这里会当场红）', () => {
+    const methods = Object.keys(client()).sort()
+    assert.deepEqual(methods, ['attempts', 'daily', 'kp', 'setDifficulty', 'state'])
+    assert.deepEqual(WRITE_METHOD_NAMES, ['setDifficulty'],
+                     'ADR-018 代价 2：写面从"结构性没有"降级为"可枚举"，这个常量就是新护栏')
+  })
+
+  it('setDifficulty 走 POST + Bearer + JSON，且带上 src=dsh', async () => {
+    const before = upstream.writes.length
+    const out = await client().setDifficulty('lin.det.05ea473736a6', 4, '要先配方')
+    assert.equal(out.difficulty, 4)
+    const sent = upstream.writes.slice(before)
+    assert.equal(sent.length, 1, '只发一次请求')
+    assert.equal(sent[0].url, '/m/qbank/set_difficulty')
+    assert.deepEqual(sent[0].body, {
+      qid: 'lin.det.05ea473736a6', difficulty: 4, reason: '要先配方', src: 'dsh',
+    })
   })
 
   it('401/非 200 都映射成 MathDrillError，且消息里没有凭据', async () => {
