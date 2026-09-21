@@ -141,6 +141,8 @@ def _list(store, payload: dict) -> dict:
             "type": q.get("type"),
             "answerType": q.get("answer_type"),
             "difficulty": q.get("difficulty"),
+            # 题面**给**（卡片要显示它）；答案与解析不在白名单里，结构上出不来。
+            "stem": q.get("stem"),
             "done": done,
             "attempts": n_att,
             "correct": n_ok,
@@ -162,7 +164,9 @@ def _list(store, payload: dict) -> dict:
             "accuracy": _pct(b["correct"], b["attempts"]),
         })
     subjects.sort(key=lambda s: (-s["total"], s["id"]))
-    items.sort(key=lambda i: (i["done"], i["qid"]))
+    # **做过的排前面**（`not done` ⇒ False=0 在前），同组按题号稳定排序。
+    # 反着写（`i["done"]`）会把 48 张未做的卡全推到前面，做完的两张沉到列表尾部 —— 实测踩过。
+    items.sort(key=lambda i: (not i["done"], i["qid"]))
 
     return {
         "schemaVersion": 1,

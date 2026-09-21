@@ -173,7 +173,10 @@
   function cardHtml(item) {
     return '<a class="qb-card" href="#/q/' + encodeURIComponent(item.qid) + '">' +
       '<div class="qb-card-top">' + stateBadge(item) + diffHtml(item.difficulty) + '</div>' +
-      '<div class="qb-card-stem">' + esc(preview(item.stem || item.qid)) + '</div>' +
+      // 卡片里**渲染**题面（公式用 KaTeX），高度由 CSS 夹住；悬停给纯文本预览。
+      // 为什么不是"只给一行纯文本"：那道行列式题去掉公式后 48 张卡长得一模一样，卡片就废了。
+      '<div class="qb-card-stem" title="' + esc(preview(item.stem || item.qid)) + '">' +
+        shell().md(item.stem || '（这道题还没有题面）') + '</div>' +
       '<div class="qb-card-foot">' +
         '<span class="qb-kid">' + esc(item.kidTitle || item.kid || '未映射考点') + '</span>' +
         '<span class="qb-src">' + esc(shortSource(item.source)) + '</span>' +

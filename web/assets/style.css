@@ -129,6 +129,11 @@ body {
   display: flex; align-items: center; justify-content: center;
   font-variant-numeric: tabular-nums;
 }
+/* ⚠️ 既存 bug 的修补（2026-09-21 实测截图）：上面这条 `display:flex` 是**作者样式**，
+   会盖掉 UA 的 `[hidden] { display:none }` ⇒ `db.hidden = true` 根本藏不住，
+   侧栏一直挂着几个红色的「0」，手机版还压在图标上。这类"计数为 0 不显示"的角标
+   一律补这一条。 */
+.nav-item .badge[hidden], #nav-ach-badge[hidden] { display: none; }
 
 .side-foot { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .streak {
@@ -1110,7 +1115,11 @@ body {
 }
 .qb-card:hover { border-color: var(--brand-line); background: var(--brand-soft); }
 .qb-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.qb-card-stem { font-size: 13px; color: var(--ink); line-height: 1.6; height: 3.2em; overflow: hidden; }
+/* 卡片题面：渲染出来的公式高矮不一（矩阵比文字高），所以不写死行高，
+   改夹一个最大高度 —— 溢出裁掉而不是把卡片撑歪。 */
+.qb-card-stem { font-size: 13px; color: var(--ink); line-height: 1.6; max-height: 5.6em; overflow: hidden; }
+.qb-card-stem p { margin: 0 0 .35em; }
+.qb-card-stem .katex-display { margin: .2em 0; overflow: hidden; }
 .qb-card-foot {
   display: flex; justify-content: space-between; gap: 8px;
   margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);

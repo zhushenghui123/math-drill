@@ -61,11 +61,15 @@ class QBankCase(unittest.TestCase):
 
     # ---- 2. 不回答案（结构保证）
     def test_list_carries_no_answer(self) -> None:
-        blob = json.dumps(self.call("list", {}), ensure_ascii=False)
+        out = self.call("list", {})
+        blob = json.dumps(out, ensure_ascii=False)
         self.assertNotIn('"answer"', blob)
         self.assertNotIn('"analysis"', blob)
         self.assertNotIn(Q1["answer"], blob)
         self.assertNotIn(Q1["analysis"], blob)
+        # 但**题面要给**：卡片要显示它（本轮实测就栽在这 —— 卡片当时退化成显示题号）
+        self.assertEqual(out["items"][0]["stem"], Q1["stem"])
+        self.assertTrue(all(i.get("stem") for i in out["items"]), "每张卡片都要有题面")
 
     def test_detail_carries_stem_but_no_answer(self) -> None:
         out = self.call("detail", {"qid": Q1["id"]})
@@ -106,6 +110,11 @@ class QBankCase(unittest.TestCase):
         self.assertEqual(len(out["subjects"]), 2, "subjects 恒为全量（不受筛选影响）")
         self.assertTrue(out["items"][0]["done"])
         self.assertEqual(out["items"][0]["lastDay"], time.strftime("%Y-%m-%d"))
+
+        # **做过的排前面**：两个学科一起看时，做完的那张不能被 48 张未做的压到列表尾部
+        # （实测踩过：写成 `key=(i["done"], qid)` 时 False 先排，做完的沉底）
+        both = self.call("list", {})
+        self.assertTrue(both["items"][0]["done"], "列表首个必须是做过的那道")
 
         detail = self.call("detail", {"qid": Q2["id"]})
         self.assertTrue(detail["done"])
