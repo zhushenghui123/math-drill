@@ -101,7 +101,10 @@ PROFILES: dict[str, dict] = {
     "tongji-jiaocai-1": {
         "dir": "tongji-jiaocai-1-同济高等数学教材上册第七版",
         "title": "同济 高等数学 教材 上册（第七版）",
-        "anchor": re.compile(r"^\s*例\s*(\d{1,3})"),
+        # 教材里**两套编号并存**：正文例题 `例N`（无点）与课后习题 `N.`（可带 `*` 难度星）。
+        # 实测模型抓到的主要是后者（`*10. 利用泰勒公式求下列极限:`）—— 决策人 2026-09-21 明确
+        # "没有答案的、光有例题的也能跑"，所以两套都要认；否则它们全落 `inferred`（实测 667/677）。
+        "anchor": re.compile(r"^\s*(?:例\s*)?\*?\s*(\d{1,3})[.\s]"),
         "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
         "number_kind": "chapter_scoped",
         "expect_max": None, "known_gaps": [], "known_duplicates": [],
@@ -109,7 +112,7 @@ PROFILES: dict[str, dict] = {
     "tongji-jiaocai-2": {
         "dir": "tongji-jiaocai-2-同济高等数学教材下册第七版",
         "title": "同济 高等数学 教材 下册（第七版）",
-        "anchor": re.compile(r"^\s*例\s*(\d{1,3})"),
+        "anchor": re.compile(r"^\s*(?:例\s*)?\*?\s*(\d{1,3})[.\s]"),
         "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
         "number_kind": "chapter_scoped",
         "expect_max": None, "known_gaps": [], "known_duplicates": [],
@@ -117,7 +120,7 @@ PROFILES: dict[str, dict] = {
     "zheda-jiaocai": {
         "dir": "zheda-jiaocai-浙大概率论与数理统计教材第四版",
         "title": "浙大 概率论与数理统计 教材（第四版）",
-        "anchor": re.compile(r"^\s*例\s*(\d{1,3})"),
+        "anchor": re.compile(r"^\s*(?:例\s*)?\*?\s*(\d{1,3})[.\s]"),
         "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
         "number_kind": "chapter_scoped",
         "expect_max": None, "known_gaps": [], "known_duplicates": [],
