@@ -125,6 +125,19 @@ PROFILES: dict[str, dict] = {
         "number_kind": "chapter_scoped",
         "expect_max": None, "known_gaps": [], "known_duplicates": [],
     },
+    # 吉米多维奇 线代（2026-09-23 新 OCR，决策人在学线代）：
+    # 题号 `【N.M】` = 节.题序（实测第一批产物里是 `【4.10】``【4.12】` 这种），
+    # 与 `jmdw-gailv` **同型** ⇒ 同样不做邻号对账（"N−1/N+1"跨节不是同一个序列）。
+    "jmdw-xiandai": {
+        "dir": "jmdw-xiandai-吉米多维奇线性代数习题精选精解",
+        "title": "吉米多维奇 线性代数习题精选精解",
+        "anchor": re.compile(r"【(\d{1,3}\.\d{1,3})】"),
+        "solution_start": re.compile(r"^\s*解\s*[:：]?\s*"),
+        "number_kind": "chapter_scoped",
+        "expect_max": None,
+        "known_gaps": [],
+        "known_duplicates": [],
+    },
 }
 
 
