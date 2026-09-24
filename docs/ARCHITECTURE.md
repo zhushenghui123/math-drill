@@ -550,11 +550,13 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │   ├── test_store.py  test_api.py # [T2/T3]
 │   ├── test_dep_rules.py          # [T0] 依赖纪律 §11.4.1 三项检查
 │   ├── test_registry.py           # [T3] MANIFEST 校验与装载（被测对象 `core/registry.py` 是 T3 产出；T0 建骨架，v2.9 改标——原标 [T0] 会造成"越界/空壳/红"三解）
+│   ├── test_clean_stems.py        # 语料题面清洗器行为契约（DATA_PIPELINE §10；含"短条目不许吃掉长条目""`i<n` 不许被当 HTML 标签"两条反向断言）
 │   └── test_picker.py             # [P2b 先写]
 ├── scripts/                       # gen_bundles.py（打包 bundle）· db_init.py（**建表 + schema_version + 灌 bundle**，T7 部署前置）· backup_check.sh · refcheck.py（**文档自洽护栏，规格见 §14**）
 │                                  #   ★ 数据管线（ADR-019）：segment_corpus.py（② A 组基线·纯正则）· segment_ab.py（② A/B 实验台）
 │                                  #     · segment_hybrid.py（② **生产**：机械锚点+模型语义+校验）· annotate_kp.py（④ 68 考点标注）
-│                                  #     · import_candidates.py（灌库：questions + question_provenance 旁表）
+│                                  #     · normalize_candidates.py（题号归一 + qid 重建成阅读序 s0001…）· clean_stems.py（**题面/解析清洗**：页眉·水印·表格标签·`<eq>`·不平衡 `$`，规格见 DATA_PIPELINE §10）
+│                                  #     · rate_practiceable.py（④.b 可练性判定 ⇒ verify=agent_rated，ADR-020）· import_candidates.py（灌库：questions + question_provenance 旁表）
 ├── deploy/                        # math-drill.service / caddy.block / backup.timer + backup.service（timer 必须配对 oneshot）/ logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
 ├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE
 │                                  #   / MODULE_TEMPLATE / IMPLEMENTATION_BRIEF / DECISIONS
