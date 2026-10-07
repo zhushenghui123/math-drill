@@ -259,7 +259,7 @@ class Bridge:
         return HTTPStatus.OK, result
 
     def attempts_summary(self, *, days: int = 30, limit: int = 200) -> dict:
-        """做题记录的**聚合**（ADR-016 决策 1 的只读端点数据面）。
+        """做题记录的**聚合**（ADR-016 决策 2 的只读端点数据面）。
 
         为什么聚合而不是原样给：agent 要的是"你在哪弱"，不是流水账；
         且原样给会把上下文塞爆。**标题/答案一律不出**——只回判定结果与题号/考点。
@@ -457,7 +457,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/attempts" and method == "GET":
-                # ADR-016 决策 1：只读做题记录（复盘用）。只回判定结果与题号/考点，
+                # ADR-016 决策 2：只读做题记录（复盘用）。只回判定结果与题号/考点，
                 # **不回 stem/answer/analysis**；时间降粒度到"天"（不给秒级时间戳）。
                 try:
                     days = max(1, min(365, int((query.get("days") or ["30"])[0])))
