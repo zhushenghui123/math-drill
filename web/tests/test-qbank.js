@@ -84,6 +84,8 @@ console.log('\n=== web/js/qbank.js 题库浏览 ===');
      /subject:\s*subject,\s*chapter:\s*chapter/.test(qbankSrc));
   ok('筛选参数挂在同一份 params 上（未做 ⇒ done=false；做错 ⇒ wrong=true）',
      /params\.done\s*=\s*false/.test(qbankSrc) && /params\.wrong\s*=\s*true/.test(qbankSrc));
+  // 复核 S2 的"半格"：上面只钉住字段被设置，把 qbankList(params) 换成 qbankList() 仍会绿 ⇒ 补这一行锚
+  ok('params 真的被传出去（不是设了字段却用空参请求）', /qbankList\(params\)/.test(qbankSrc));
   ok('难度来源标记：agent 评过的题要标出来', /difficultySource === 'agent'/.test(qbankSrc)
      && /agent 评/.test(qbankSrc));
   ok('学科中文名从知识树取（不在 qbank.js 里另立一套）',

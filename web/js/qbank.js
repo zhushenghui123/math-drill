@@ -253,7 +253,10 @@
       var on = (qbFilter === key)
         ? ' style="border-color:var(--amber);color:var(--amber)"' : '';
       var arg = key ? "'" + key + "'" : 'null';
-      return '<button class="btn" onclick="MDQbank.setFilter(' + arg + ')"' + on + '>' + label + '</button>';
+      // 复核 S3：按钮文案短（"做错"）而判据是"做过但从没做对过" ⇒ 用 title 把落差补上
+      var hint = (key === 'wrong') ? ' title="做过、但从没做对过（系统不存作答原文，判不了最后一次的对错）"'
+               : (key === 'undone' ? ' title="还没做过的题"' : ' title="不筛选，看全部"');
+      return '<button class="btn"' + hint + ' onclick="MDQbank.setFilter(' + arg + ')"' + on + '>' + label + '</button>';
     }
     return '<div class="mt16" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
       '<span style="color:var(--ink-3);font-size:13px">筛选</span>' +

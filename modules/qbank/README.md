@@ -16,6 +16,9 @@ GET /m/qbank/list?subject=linear&chapter=第八章 行列式&kid=l1n1&done=false
 #   · done=false 未做 · done=true 已做 · wrong=true **做错**（做过且从没做对过）
 #   · ⚠️ wrong 的判据只能按"对/错计数"（attempts 不存作答原文，ADR-017 代价 1）⇒
 #     "最后一次做错"这类口径**做不到**，要新列，属架构级改动，本期不做（见 `module.py` `_list` 注释）
+#   · **已知限制（2026-10-07 复核 S4）**：前端筛选是 `qbank.js` 的文件内状态、**不进路由**
+#     ⇒ 刷新页面或分享链接会回到"全部"。要保状态可用 sessionStorage（零路由改动）；挂 hash 会
+#     逼着改 app.js 的两参调用与测试里的路由正则，收益不值。
 GET /m/qbank/detail?qid=<qid>                                   # 详情页（题面 + 作答史 + agent 复盘）
 ```
 
