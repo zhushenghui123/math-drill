@@ -348,8 +348,17 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "math-drill"
     bridge: Bridge          # 由 make_server 注入（类属性）
 
-    def log_message(self, fmt, *args):        # 默认写 stderr；保持安静，交给 systemd 收 stdout
-        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+    def log_message(self, fmt, *args):
+        """写访问日志到 stderr（systemd 收到 /var/log/math-drill.log）。
+
+        ⚠️ **必须抹掉 query 串**（2026-10-07 修，既存缺陷）：`/setup?t=<主 token>` 会把
+        **主 token 明文**写进日志（实测生产日志 10 处、文件 0644，与 §13.3⑤「不记 token 值」相反）。
+        治本在这里（记不出原文），治标是 service 的 `LogFileMode=0640`。
+        不采用"只对 /setup 特判"：任何端点将来带敏感 query 都会同样泄漏，一律不记 query 更稳。
+        """
+        msg = fmt % args
+        msg = re.sub(r"(/[^\s?]*)\?[^\s]*", r"\1", msg)     # `GET /setup?t=xx HTTP/1.1` → `GET /setup HTTP/1.1`
+        sys.stderr.write("%s - %s\n" % (self.address_string(), msg))
 
     # ---- 公共
     def _send(self, status: int, body: dict, *, extra_headers: list[tuple[str, str]] | None = None):

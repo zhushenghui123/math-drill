@@ -40,6 +40,9 @@ ReadWritePaths=/var/lib/math-drill
 # （§12.1 注①，man 5 systemd.exec 佐证）。轮转必须 copytruncate（见 logrotate.d/math-drill）
 StandardOutput=append:/var/log/math-drill.log
 StandardError=append:/var/log/math-drill.log
+# 日志里会出现路径与状态码（正文永不记）⇒ 文件只给服务属主与 root 读（2026-10-07 加；
+# 配合 bridge/api.py 的 log_message 抹 query，两层一起把"/setup?t=<主 token>"这类泄漏关掉）
+LogFileMode=0640
 
 [Install]
 WantedBy=multi-user.target
