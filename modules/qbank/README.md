@@ -11,7 +11,11 @@
 ## 对外接口（**走既有模块路由，不是新端点**）
 
 ```
-GET /m/qbank/list?subject=linear&kid=l1n1&done=false&limit=80   # 栏目页（items 受筛选，subjects 恒为全量）
+GET /m/qbank/list?subject=linear&chapter=第八章 行列式&kid=l1n1&done=false&wrong=true&limit=80
+# 栏目页：**五个筛选**（subject / chapter / kid / done / wrong，`items` 受筛选，`subjects[]`/`groups[]` 恒为全量）
+#   · done=false 未做 · done=true 已做 · wrong=true **做错**（做过且从没做对过）
+#   · ⚠️ wrong 的判据只能按"对/错计数"（attempts 不存作答原文，ADR-017 代价 1）⇒
+#     "最后一次做错"这类口径**做不到**，要新列，属架构级改动，本期不做（见 `module.py` `_list` 注释）
 GET /m/qbank/detail?qid=<qid>                                   # 详情页（题面 + 作答史 + agent 复盘）
 ```
 
