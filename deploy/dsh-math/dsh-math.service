@@ -1,0 +1,19 @@
+[Unit]
+Description=DeepSeek Harness Web UI (Math Drill 插件)
+After=network.target math-drill.service
+Wants=math-drill.service
+
+[Service]
+Type=simple
+User=mathdsh
+WorkingDirectory=/home/mathdsh/math-drill-plugin
+Environment=DSH_HOME=/home/mathdsh/.dsh
+# 只绑回环：对外要么 SSH 隧道，要么以后接 Caddy+Authelia（不直接暴露）
+ExecStart=/usr/bin/dsh web --host 127.0.0.1 --port 39195 --no-open
+Restart=on-failure
+# ⚠️ 日志里有 dsh web 的访问 token ⇒ 文件必须 600，**且不许把它的内容打进会话/工单**
+StandardOutput=append:/root/dsh-math.log
+StandardError=append:/root/dsh-math.log
+
+[Install]
+WantedBy=multi-user.target
