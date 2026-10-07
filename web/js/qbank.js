@@ -237,10 +237,37 @@
 
   /* ---------------------------------------------------------------- 题目列表页（某一类型） */
 
+  /* 筛选状态（未做 / 做错）：**只活在本文件里，不动路由** ——
+     路由是 app.js 调的（MDQbank.pageChapter(subject, chapter)，只有两个参数），
+     多传一个参数就得改 app.js 的解析，收益不值这个风险。 */
+  var qbFilter = null;      // null（全部）| 'undone' | 'wrong'
+  var qbLast = null;        // { subject, chapter } —— 供切换筛选后原地重绘
+
+  function setFilter(f) {
+    qbFilter = (qbFilter === f) ? null : f;   // 再点一次同一个按钮 = 取消筛选
+    if (qbLast) { pageChapter(qbLast.subject, qbLast.chapter); }
+  }
+
+  function filterBar() {
+    function btn(key, label) {
+      var on = (qbFilter === key)
+        ? ' style="border-color:var(--amber);color:var(--amber)"' : '';
+      var arg = key ? "'" + key + "'" : 'null';
+      return '<button class="btn" onclick="MDQbank.setFilter(' + arg + ')"' + on + '>' + label + '</button>';
+    }
+    return '<div class="mt16" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<span style="color:var(--ink-3);font-size:13px">筛选</span>' +
+      btn(null, '全部') + btn('undone', '未做') + btn('wrong', '做错') + '</div>';
+  }
+
   function pageChapter(subject, chapter) {
     var host = main();
     host.innerHTML = shell().head(chapter, '载入题库…');
-    api().qbankList({ subject: subject, chapter: chapter, limit: NAV_LIMIT }).then(function (d) {
+    qbLast = { subject: subject, chapter: chapter };
+    var params = { subject: subject, chapter: chapter, limit: NAV_LIMIT };
+    if (qbFilter === 'undone') { params.done = false; }
+    if (qbFilter === 'wrong') { params.wrong = true; }
+    api().qbankList(params).then(function (d) {
       if (!subjectsCache) { subjectsCache = d.subjects || []; fillNav(subjectsCache); }
       var g = (d.groups || []).filter(function (x) { return x.chapter === chapter; })[0] ||
               { total: 0, done: 0, mastered: 0, coverage: 0, score: 0, accuracy: 0, attempts: 0 };
@@ -254,10 +281,14 @@
         // accuracy/attempts 直接取服务端算好的 —— 前端不自己推指标（两处真值就会分叉）
         accuracy: g.accuracy || 0, attempts: g.attempts || 0,
       });
+      html += filterBar();
       if (!items.length) {
-        html += '<div class="card mt16"><div class="card-title">这个类型还没有题</div>' +
+        html += '<div class="card mt16"><div class="card-title">' +
+          (qbFilter ? '没有符合条件的题' : '这个类型还没有题') + '</div>' +
           '<div style="color:var(--ink-3);font-size:13px;line-height:1.7">' +
-          '题库里还没有归到这个类型的题目 —— 数据提炼跑完就会自动出现在这里。</div></div>';
+          (qbFilter
+            ? '换个筛选看看，或点「全部」。<br>⚠️「做错」= 做过但**从没做对过**（系统不存作答原文，判不了"最后一次做错"）。'
+            : '题库里还没有归到这个类型的题目 —— 数据提炼跑完就会自动出现在这里。') + '</div></div>';
       } else {
         html += '<div class="qb-grid">' + items.map(cardHtml).join('') + '</div>';
       }
@@ -385,6 +416,7 @@
   root.MDQbank = {
     pageSubject: pageSubject,
     pageChapter: pageChapter,
+    setFilter: setFilter,
     pageQuestion: pageQuestion,
     loadSubjects: loadSubjects,
     fillNav: fillNav,
