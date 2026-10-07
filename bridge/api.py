@@ -259,7 +259,7 @@ class Bridge:
             return None, HTTPStatus.NOT_FOUND
         return candidate, HTTPStatus.OK
 
-    def judge_request(self, payload: dict) -> tuple[int, dict]:
+    def judge_request(self, payload: dict, user: str = "owner") -> tuple[int, dict]:
         qid = payload.get("qid")
         raw = payload.get("raw_answer")
         if not isinstance(qid, str) or not isinstance(raw, str):
@@ -280,10 +280,11 @@ class Bridge:
 
         self.store.record_attempt(qid=qid, kid=row["kid"], result=result,
                                   user_ms=payload.get("user_ms"), device=payload.get("device"),
-                                  user=self.user_of(self))
+                                  user=user)
         return HTTPStatus.OK, result
 
-    def attempts_summary(self, *, days: int = 30, limit: int = 200) -> dict:
+    def attempts_summary(self, *, days: int = 30, limit: int = 200,
+                         user: str = "owner") -> dict:
         """做题记录的**聚合**（ADR-016 决策 2 的只读端点数据面）。
 
         为什么聚合而不是原样给：agent 要的是"你在哪弱"，不是流水账；
@@ -292,7 +293,7 @@ class Bridge:
         "能还原你几点在做题"的读面（评审 Q7②）。
         """
         since = time.time() - days * 86400
-        rows = [r for r in self.store.list_attempts(user=self.user_of(self))
+        rows = [r for r in self.store.list_attempts(user=user)
                 if float(r.get("ts") or 0) >= since]
         by_qid = {q["id"]: q for q in self.store.list_questions()}
         totals = {"n": len(rows), "correct": 0, "wrong": 0, "accuracy": None}
@@ -503,11 +504,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(HTTPStatus.BAD_REQUEST, {"error": ErrorCode.MALFORMED_REQUEST.value,
                                                         "message": "days/limit 必须是整数"})
                     return
-                self._send(HTTPStatus.OK, b.attempts_summary(days=days, limit=limit))
+                self._send(HTTPStatus.OK, b.attempts_summary(days=days, limit=limit, user=b.user_of(self)))
                 return
 
             if path == "/api/judge" and method == "POST":
-                status, body = b.judge_request(self._read_json())
+                status, body = b.judge_request(self._read_json(), user=b.user_of(self))
                 self._send(status, body)
                 return
 
