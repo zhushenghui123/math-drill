@@ -150,6 +150,7 @@ def _list(store, payload: dict) -> dict:
     chapter = payload.get("chapter") or None      # 题目类型（= kp 的章，如「第八章 行列式」）
     kid = payload.get("kid") or None
     done_filter = _bool_of(payload.get("done"))           # None / True / False
+    wrong_filter = _bool_of(payload.get("wrong"))         # None / True / False（"错过且没做对过"）
     limit = _limit_of(payload)
 
     kp = _kp_index(store)
@@ -169,6 +170,10 @@ def _list(store, payload: dict) -> dict:
         n_att = int(st["n"]) if st else 0
         n_ok = int(st["correct"] or 0) if st else 0
         done = n_att > 0
+        # 「做错」= 做过但**从没做对过**（有过错题记录）。注意 attempts 只存判定结果，
+        # 不存作答原文（ADR-017 代价 1），所以这里只能按"对/错计数"判，不能按最后一次的对错判
+        # —— 后者要新列，属架构级改动，本期不做。
+        wrong = n_att > 0 and n_ok == 0
 
         b = buckets.setdefault(subj, {"id": subj, "total": 0, "done": 0, "mastered": 0, "attempts": 0, "correct": 0})
         b["total"] += 1
@@ -197,12 +202,16 @@ def _list(store, payload: dict) -> dict:
             continue
         if done_filter is not None and bool(done_filter) != done:
             continue
+        if wrong_filter is not None and bool(wrong_filter) != wrong:
+            continue
         items.append({
             "qid": q["id"],
             "kid": q.get("kid"),
             "kidTitle": node.get("title"),
             "chapter": node.get("chapter"),
             "subject": subj,
+            "done": done,
+            "wrong": wrong,
             "type": q.get("type"),
             "answerType": q.get("answer_type"),
             **_difficulty_fields(q["id"], q.get("difficulty"), adiff),
