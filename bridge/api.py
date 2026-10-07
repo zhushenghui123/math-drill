@@ -202,7 +202,17 @@ class Bridge:
         Authorization 值就换一个新桶 ⇒ 限速形同虚设（评审 B1）。故只有**已验证**的
         凭据才分档，其余一律 `anon`（回落 IP 桶）。
         两条路径都用 `hmac.compare_digest`（常数时间）；同时有效时判 `browser`（它确实是浏览器）。
+
+        **边缘鉴权（ADR-021，2026-10-07）**：Caddy 前面挂了 Authelia（`forward_auth`），
+        鉴权通过后它会注入 `Remote-User`（官方集成文档的标准做法）。这里把该头认成浏览器身份。
+        ⚠️ **只信回环来源**：服务只绑 `127.0.0.1`（config/server.toml），能从这个地址连过来的
+        本来就有本机权限；外网客户端无法伪造（它们连不到 8081，只到 Caddy）。
+        带 `Authorization` 头的服务间请求在 Caddy 侧已被排除在 `forward_auth` 之外，
+        所以 agent 那条路不受影响（两者互不冒充的纪律不破）。
         """
+        remote_user = handler.headers.get("Remote-User")
+        if remote_user and handler.client_address[0] == "127.0.0.1":
+            return "browser"
         got = self.cookies(handler).get(self.cfg.cookie_name, "")
         if got and hmac.compare_digest(got, self.cookie_value):
             return "browser"

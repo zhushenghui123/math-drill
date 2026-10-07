@@ -475,3 +475,35 @@ Chandra 2 的「硬件闸门未验」升级为**已判定不适配**：实测为
 - **与既有 ADR 的关系**：**收窄并改写 ADR-013 的适用范围**（它管"机器判分的答案来源"，不再管"agent 给的学习反馈"）；
   **不破** ADR-003（judge 仍无 LLM）、ADR-007（attempts 仍 judge 独占）、ADR-019（旁表/三值/未审核不进练习池都不变）。
 - 裁判：决策人定调；执行方落边界（**评分可以来自 agent，但"标准答案"与"评分"必须是两笔账**）。
+
+---
+
+## ADR-021 · 边缘鉴权与身份下沉：Caddy + Authelia 管认证，bridge 只认回环来的 `Remote-User`（2026-10-07）
+
+- **背景**：决策人要"访问站点先出登录页、登一次记住"，并明确要求**不自己造轮子**（"开源社区应该有成熟模板，直接嵌入"）。
+  原形态是 `/setup?t=<主 token>`：把凭据塞进 URL（曾把主 token 明文写进日志，已修），且没有登录页、没有"记住我"的入口。
+- **约束（为什么不能嵌 Python 认证框架）**：ADR-005 定的是**服务端零第三方依赖**（纯 stdlib http.server）。
+  把 Flask-Login/FastAPI-Users 之类嵌进来 = **重写 bridge**，代价大于收益；而成熟件能直接落的位置**本来就有**——
+  我们已经在用 Caddy 终结 TLS，它自带 `http_basic`/`forward_auth` 生态。
+- **决策**：
+  1. **认证交给边缘层**：新增 **Authelia 容器**（`docker run`，不改进既有 compose），Caddy 用官方集成文档的标准写法
+     `forward_auth 127.0.0.1:9091 { uri /api/authz/forward-auth; copy_headers Remote-User … }` 保护 `math.zhu2006.xyz`。
+     登录页在 `auth.zhu2006.xyz`，**"记住我"= 1 个月**（`session.remember_me_duration: 1M`）。
+  2. **身份下沉的单点**：Authelia 放行后 Caddy 注入 `Remote-User`；`Bridge.identity()` 把它认成 `browser`，
+     **但只信来源 IP = `127.0.0.1` 的请求**（服务只绑回环，外网连不到 8081，只到 Caddy）⇒ 伪造无效，已行为验证。
+  3. **两条路仍然分离**：带 `Authorization` 头的**服务间请求在 Caddy 侧被排除**（`not header Authorization *`），
+     所以 DSH 插件的 Bearer 路径**不经过登录页**，继续由 bridge 自己的凭据门判定（`agent` 分支）——ADR-015 决策 3 的域分离不破。
+  4. **`/setup` 降级**：它不再是"唯一不过门的引导入口"，而是**引导/兜底入口之一**（日常浏览器走 Authelia）。
+  5. **用户与口令**：文件后端 + **argon2id 哈希**（服务器只存不可逆哈希）；开户/改密走自带脚本
+     （`/root/set-authelia-password.sh`，口令不回显、不落盘、不进命令行历史）。**没有任何地方存明文口令。**
+- **代价（承认）**：
+  1. **Authelia 成为新的单点**：它挂了 = 浏览器面登不进（agent 的 Bearer 路径不受影响）；容器 `--restart unless-stopped` 兜一层。
+  2. **多一个要维护的东西**（容器 + SQLite + 配置），换来的是不用自己发明会话/口令/防爆破/2FA。
+  3. **网络拓扑有坑（实测踩过）**：`caddy-for-ols` 跑在 **host 网络**，解析不到容器名 ⇒ `forward_auth` 上游必须写
+     **`127.0.0.1:9091`**（Authelia 发布在回环），不能写 `authelia:9091`；写错的表现是整站 **502**。
+  4. **数据隔离尚未生效**：本 ADR 只做"认证"，`attempts`/blob 仍是**全实例一份** ⇒ 多个用户登进来会看到同一份数据。
+     按决策人 D1（"每人一个独立控制台"）这属于**下一步**，本 ADR 明确登记为未完成项。
+  5. Authelia 4.38 起 `server.host/port` 已弃用（改 `server.address`），不处理只是启动时两条无害警告。
+- **与既有 ADR 的关系**：**收窄 ADR-011/§13.3**（凭据派生的那套仍服务于 agent/兜底，浏览器日常改由 Authelia 会话）；
+  **不破** ADR-015 决策 3（域分离，agent 走 Bearer）、ADR-016（只读数据面与"不回他人数据"是下一步的事）、ADR-007。
+- **裁判**：决策人定调（D3/D4/D5 + "不造轮子"）；执行方落地并登记三条代价（单点、网络坑、隔离未做）。

@@ -1,0 +1,56 @@
+# deploy/authelia —— 边缘鉴权（Authelia）的落地形态（ADR-021）
+
+> ⚠️ **本目录只有模板，密钥与用户文件永不入仓**：真实文件在服务器的 `/root/authelia/`（700），
+> 其中 `configuration.yml` 含 session/JWT/storage 三个密钥、`users_database.yml` 含 argon2id 哈希。
+
+## 为什么是 Authelia（而不是自己写登录）
+
+决策人要求"用成熟件、别造轮子"，而 `ADR-005` 又定死了**服务端零第三方依赖**（纯 stdlib `http.server`）——
+Python 生态的认证框架（Flask-Login / FastAPI-Users…）嵌进来等于重写 bridge。**成熟件能直接落的位置是边缘层的 Caddy**：
+我们在用 Caddy 终结 TLS，它天生支持 `forward_auth` 这套标准做法。
+
+## 服务器上的形态（实测过的那个）
+
+```
+/root/authelia/                      # 700
+├── configuration.yml                # 600（含三个密钥）
+├── users_database.yml               # 600（argon2id 哈希，无明文）
+├── db.sqlite3                       # Authelia 自己的存储（会话/regulation）
+└── notification.txt                 # 文件后端"通知"（本部署不发邮件）
+/root/set-authelia-password.sh        # 700 改密脚本（不回显、不落盘）
+/root/authelia-initial-password.txt   # 600 首登口令（改完可删）
+```
+
+容器用 **`docker run`** 起（**不动**既有的 `docker-compose.yml`，避免波及 couchdb/vocab）：
+
+```bash
+docker run -d --name authelia --restart unless-stopped \
+  --network obsidian-livesync_internal --network-alias authelia \
+  -p 127.0.0.1:9091:9091 -v /root/authelia:/config authelia/authelia:latest
+```
+
+## ⚠️ 那个坑（踩过一次，整站 502）
+
+`caddy-for-ols` 跑在 **host 网络**上 ⇒ 它**解析不到容器名 `authelia`**。
+所以 Caddyfile 里 `forward_auth` 的上游必须写 **`127.0.0.1:9091`**（Authelia 已发布在回环），
+写成 `authelia:9091` 的表现是**浏览器面 502**、而 agent 的 Bearer 路径照常 200（容易误判成 bridge 出问题）。
+
+## Caddyfile 的接法（照 Authelia 官方 integration/proxies/caddy.md）
+
+见 `deploy/caddy.block`：`math.zhu2006.xyz` 块里 `forward_auth` + `auth.zhu2006.xyz` 站点块。
+关键一行是**把带 `Authorization` 头的服务间请求排除**（`not header Authorization *`），否则 DSH 插件会被登录页拦住。
+
+## 开户 / 改密
+
+```bash
+# 改密（交互输入，不回显）
+ssh -t root@<server> /root/set-authelia-password.sh
+# 开户：生成哈希 → 追加进 users_database.yml → docker restart authelia
+docker exec authelia authelia crypto hash generate argon2 --password '<初始口令>'
+```
+
+## 回滚（一条命令级）
+
+`cp -p /var/backups/math-drill/pre-authelia-<TS>/Caddyfile /root/obsidian-livesync/Caddyfile`
+→ `docker exec caddy-for-ols caddy validate --config /etc/caddy/Caddyfile`
+→ `caddy reload` → `docker stop authelia`

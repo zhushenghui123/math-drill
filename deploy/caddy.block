@@ -11,5 +11,21 @@ math.zhu2006.xyz {
 	tls {
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
+	# 浏览器走登录页；带 Authorization 头的**服务间请求（DSH 插件）绕过它**（ADR-021）
+	@browser {
+		not header Authorization *
+	}
+	forward_auth @browser 127.0.0.1:9091 {
+		uri /api/authz/forward-auth
+		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+	}
 	reverse_proxy 127.0.0.1:8081
+}
+
+# Authelia 自己的登录页（证书同样用 Cloudflare DNS 挑战）
+auth.zhu2006.xyz {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	reverse_proxy 127.0.0.1:9091
 }
