@@ -27,12 +27,25 @@ from contracts.answer_types import Verdict
 __all__ = ["ConflictError", "Store", "SCHEMA_VERSION"]
 
 #: 2 = 加 `agent_notes` 表（ADR-017）；3 = 加 `agent_difficulty` 表（ADR-018）；
-#: 4 = 加 `question_provenance` 旁表（ADR-019，语料题出处/题号来源/验证状态）。
+#: 4 = 加 `question_provenance` 旁表（ADR-019，语料题出处/题号来源/验证状态）；
+#: 5 = **加列**：`attempts.user_id` / `agent_notes.user_id`（多用户数据隔离第一步）。
 #: **注意迁移现状**：本文件的 schema 变更至今
 #: **全是"加表"**，靠 `CREATE TABLE IF NOT EXISTS` 每次启动幂等地补上；**没有**真正的
 #: 步进迁移（加列/改类型没有机制）。故 `ensure_schema` 允许把已记录的版本号**前推**
 #: （见其 docstring）；哪天要加列，必须先补步进迁移，不许再靠这一手。
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+
+#: **步进迁移**：加列/改类型只能写在这里（`CREATE TABLE IF NOT EXISTS` 只能加表）。
+#: 键 = 目标版本；值 = 按序执行的 SQL；只在「库里记的版本 < 目标版本」时执行，
+#: **成功后才前推版本号** ⇒ 失败不会留下"版本说迁移了、结构其实没动"的假象。
+_MIGRATIONS: dict[int, list[str]] = {
+    5: [
+        "ALTER TABLE attempts    ADD COLUMN user_id TEXT NOT NULL DEFAULT 'owner'",
+        "ALTER TABLE agent_notes ADD COLUMN user_id TEXT NOT NULL DEFAULT 'owner'",
+        "CREATE INDEX IF NOT EXISTS idx_attempts_user ON attempts(user_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_notes_user ON agent_notes(user_id, kind)",
+    ],
+}
 
 #: §3.5 的合并规则（真值副本在 contracts/blob_merge.md；两处不一致以那份为准）
 MERGE_RULES = {
@@ -86,7 +99,8 @@ CREATE TABLE IF NOT EXISTS attempts (
     verdict TEXT    NOT NULL,
     correct INTEGER,
     user_ms INTEGER,
-    device  TEXT
+    device  TEXT,
+    user_id TEXT    NOT NULL DEFAULT 'owner'
 );
 CREATE TABLE IF NOT EXISTS agent_notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +111,8 @@ CREATE TABLE IF NOT EXISTS agent_notes (
     reason     TEXT,
     author     TEXT    NOT NULL,
     src        TEXT    NOT NULL,
-    ts         REAL    NOT NULL
+    ts         REAL    NOT NULL,
+    user_id    TEXT    NOT NULL DEFAULT 'owner'
 );
 CREATE INDEX IF NOT EXISTS idx_agent_notes_qid ON agent_notes(qid, id);
 CREATE TABLE IF NOT EXISTS agent_difficulty (
@@ -184,9 +199,14 @@ class Store:
             if row is None:
                 self.conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', ?)",
                                   (str(SCHEMA_VERSION),))
-            elif int(row["value"]) < SCHEMA_VERSION:
-                self.conn.execute("UPDATE meta SET value = ? WHERE key='schema_version'",
-                                  (str(SCHEMA_VERSION),))
+            else:
+                have = int(row["value"])
+                if have < SCHEMA_VERSION:
+                    for ver in range(have + 1, SCHEMA_VERSION + 1):
+                        for stmt in _MIGRATIONS.get(ver, []):
+                            self.conn.execute(stmt)
+                    self.conn.execute("UPDATE meta SET value = ? WHERE key='schema_version'",
+                                      (str(SCHEMA_VERSION),))
             self.conn.commit()
             return self.schema_version
 
