@@ -63,6 +63,7 @@ class Config:
     api_per_minute: int
     setup_max_failures: int
     setup_window_seconds: int
+    owner_user: str = "owner"
 
 
 def load_config(repo: Path | str = REPO) -> Config:
@@ -76,6 +77,7 @@ def load_config(repo: Path | str = REPO) -> Config:
         api_per_minute=int(r["api_per_minute"]),
         setup_max_failures=int(r["setup_max_failures"]),
         setup_window_seconds=int(r["setup_window_seconds"]),
+        owner_user=a.get("owner_user", "owner"),
     )
 
 
@@ -230,7 +232,10 @@ class Bridge:
         """
         remote = handler.headers.get("Remote-User")
         if remote and handler.client_address[0] == "127.0.0.1":
-            return remote.strip() or "owner"
+            who = remote.strip() or "owner"
+            # ⚠️ 管理员映射到 `owner`：历史数据（attempts/blob）都挂在 owner 名下，
+            # 不做这个映射 = 换成 Authelia 登录后**自己看不见自己的进度**（config: auth.owner_user）
+            return "owner" if who == getattr(self.cfg, "owner_user", "owner") else who
         return "owner"
 
     def bucket_key(self, handler: BaseHTTPRequestHandler) -> str:
@@ -368,6 +373,33 @@ class Bridge:
 
 
 # ---------------------------------------------------------------- HTTP
+
+class UserScopedStore:
+    """把 `Store` 包一层，**把"我是谁"注入到所有按用户的方法上**（多用户隔离的收口点）。
+
+    为什么用包装而不是改模块签名：`registry.dispatch(..., ctx=store)` 是**全体模块的统一入口**，
+    改签名要动 10 个模块 + 各自测试；包装只动一处，且**新写的模块天然受保护**
+    （只要它调的是 Store 上这批按用户的方法）。未列的方法原样透传。
+    """
+
+    _USER_KW = ("list_attempts", "list_attempt_stats", "record_attempt", "record_note",
+                "get_blob", "put_blob", "put_settings")
+
+    def __init__(self, store, user: str) -> None:
+        self._store = store
+        self._user = user or "owner"
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._store, name)
+        if name not in self._USER_KW:
+            return attr
+
+        def scoped(*a, **kw):
+            kw.setdefault("user", self._user)
+            return attr(*a, **kw)
+
+        return scoped
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "math-drill"
@@ -533,7 +565,8 @@ class Handler(BaseHTTPRequestHandler):
                 payload.update({k: (v[-1] if isinstance(v, list) and v else v)
                                 for k, v in query.items()})
                 try:
-                    out = b.registry.dispatch(key, rpc, payload, ctx=b.store)
+                    out = b.registry.dispatch(key, rpc, payload,
+                                              ctx=UserScopedStore(b.store, b.user_of(self)))
                 except KeyError as exc:
                     self._send(HTTPStatus.NOT_FOUND, {"error": "no_such_rpc", "message": str(exc)})
                     return

@@ -10,6 +10,7 @@ data_dir = "/var/lib/math-drill"  # 部署态；开发态就改本文件这一�
 cookie_name = "md_session"
 cookie_ttl_days = 365
 token_file_env = "MATH_DRILL_TOKEN_FILE"
+owner_user = "zhu"               # Authelia 里的管理员用户名 ⇒ 映射到历史数据的 owner（见 ADR-021）
 
 [ratelimit]
 api_per_minute = 60          # /api/* 与 /m/*：每**桶**每分钟允许次数，桶键见 ARCHITECTURE §13.1 语义注①（全部请求）
