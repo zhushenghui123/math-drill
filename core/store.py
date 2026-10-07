@@ -217,37 +217,43 @@ class Store:
             return int(row["value"]) if row else 0
 
     # ------------------------------------------------------------ blob
-    def get_blob(self) -> dict:
-        """返回服务端持有的完整 blob（含 server_version）。"""
+    def _blob_path_of(self, user: str) -> Path:
+        """每个用户一个 blob 文件；**owner 沿用历史路径 `blob.json`**（老数据零迁移）。"""
+        return self.blob_path if user in ("", "owner", None) else self.data_dir / f"blob-{user}.json"
+
+    def get_blob(self, user: str = "owner") -> dict:
+        """返回**该用户**持有的完整 blob（含 server_version）。"""
+        path = self._blob_path_of(user)
         with self._lock:
-            if not self.blob_path.exists():
+            if not path.exists():
                 return {"server_version": 0, "data": {}}
-            with open(self.blob_path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 blob = json.load(f)
             blob.setdefault("server_version", 0)
             blob.setdefault("data", {})
             return blob
 
-    def _write_blob(self, blob: dict) -> None:
-        """原子替换 + fsync（断电不产生半个文件）。"""
+    def _write_blob(self, blob: dict, user: str = "owner") -> None:
+        """原子替换 + fsync（断电不产生半个文件）。**按用户落到各自的文件**。"""
+        path = self._blob_path_of(user)
         with self._lock:
-            tmp = self.blob_path.with_suffix(".json.tmp")
+            tmp = path.with_suffix(".json.tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(blob, f, ensure_ascii=False, sort_keys=True)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, self.blob_path)
+            os.replace(tmp, path)
             dir_fd = os.open(self.data_dir, os.O_DIRECTORY)
             try:
                 os.fsync(dir_fd)
             finally:
                 os.close(dir_fd)
 
-    def put_blob(self, base_version: int, incoming: dict) -> dict:
+    def put_blob(self, base_version: int, incoming: dict, user: str = "owner") -> dict:
         """客户端整块 PUT。成功返回新 blob；版本不匹配抛 ConflictError（带最新 blob）。"""
         if not isinstance(incoming, dict):
             raise ValueError("incoming 必须是 dict")
-        current = self.get_blob()
+        current = self.get_blob(user)
         if int(base_version) != int(current["server_version"]):
             raise ConflictError(current)
 
@@ -264,20 +270,20 @@ class Store:
             merged[key] = value
 
         blob = {"server_version": int(current["server_version"]) + 1, "data": merged}
-        self._write_blob(blob)
+        self._write_blob(blob, user)
         return blob
 
-    def put_settings(self, base_version: int, settings: dict) -> dict:
+    def put_settings(self, base_version: int, settings: dict, user: str = "owner") -> dict:
         """§3.5：客户端改设置 = **显式 PUT 特殊段**（避免两设备互踩）。"""
         if not isinstance(settings, dict):
             raise ValueError("settings 必须是 dict")
-        current = self.get_blob()
+        current = self.get_blob(user)          # ← 必须是**该用户**的 blob（否则版本比 owner 的）
         if int(base_version) != int(current["server_version"]):
             raise ConflictError(current)
         merged = dict(current["data"])
         merged["settings"] = settings
         blob = {"server_version": int(current["server_version"]) + 1, "data": merged}
-        self._write_blob(blob)
+        self._write_blob(blob, user)
         return blob
 
     # ------------------------------------------------------------ attempts（I5）

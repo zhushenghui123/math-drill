@@ -465,12 +465,13 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/state":
                 if method == "GET":
-                    self._send(HTTPStatus.OK, b.store.get_blob())
+                    self._send(HTTPStatus.OK, b.store.get_blob(b.user_of(self)))
                 else:
                     payload = self._read_json()
                     try:
                         blob = b.store.put_blob(payload.get("base_version", -1),
-                                                payload.get("data", {}))
+                                                payload.get("data", {}),
+                                                user=b.user_of(self))
                     except ConflictError as exc:
                         self._send(HTTPStatus.CONFLICT, {"error": "conflict", "latest": exc.latest})
                         return
@@ -478,7 +479,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/daily" and method == "GET":
-                blob = b.store.get_blob()
+                blob = b.store.get_blob(b.user_of(self))
                 # ADR-016 决策 4：**判定写死在这里** —— daily_questions/_question_json 都没有
                 # request 上下文，identity 需要 handler ⇒ 只有这一层能算。
                 # 判据 `== "browser"`（fail-closed）：只有已验证的浏览器会话拿得到 answer/analysis。
