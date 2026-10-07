@@ -43,13 +43,23 @@ unset CRED
 
 echo "== 7. systemd 单元"
 install -m 644 "$(dirname "$0")/dsh-math.service" /etc/systemd/system/dsh-math.service
+# ⚠️ 三处幂等修正（2026-10-07 复核指出）：
+#   ① **不许先清空日志**：清了之后若启动失败，日志里就没有 token 行 ⇒ 下一步写出的访问链接是空的；
+#   ② 单元被改过时 `enable --now` **不会重启**已在跑的进程 ⇒ 必须显式 restart；
+#   ③ 日志用追加（`>>`），取**最后一条** token 行即可（不用清）。
 install -m 600 /dev/null /root/dsh-math.log
-systemctl daemon-reload && systemctl enable --now dsh-math.service
+systemctl daemon-reload && systemctl enable dsh-math.service >/dev/null
+systemctl restart dsh-math.service
 sleep 25
 echo "  服务: $(systemctl is-active dsh-math.service)"
 echo "  阅读 agent（应仍 active）: $(systemctl is-active dsh-web.service)"
 
 echo "== 8. 访问链接（不回显）"
-grep -o 'http://127.0.0.1:39195/?token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1 > /root/dsh-math-access.txt
-chmod 600 /root/dsh-math-access.txt
-echo "  已写 /root/dsh-math-access.txt（600）——在服务器上 cat 取链接，本机用 ssh -N -L 39195:127.0.0.1:39195 开隧道"
+# ⚠️ 修正 ④（同一类）：**先把链接取到临时文件，非空才 mv** —— 否则 grep 落空时
+#    `> access.txt` 会先把好文件清空，留下一个空的访问链接（初稿就是这个毛病）
+umask 077
+TMP=$(mktemp /root/.dsh-math-access.XXXXXX)
+grep -o 'http://127.0.0.1:39195/?token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1 > "$TMP"
+if [ -s "$TMP" ]; then mv "$TMP" /root/dsh-math-access.txt; chmod 600 /root/dsh-math-access.txt
+  echo "  已写 /root/dsh-math-access.txt（600）——服务器上 cat 取链接，本机 ssh -N -L 39195:127.0.0.1:39195 开隧道"
+else echo "  ⚠️ 没拿到 token 行（服务没起来？）——**没有覆盖旧的 access.txt**，去看 /root/dsh-math.log"; rm -f "$TMP"; exit 1; fi

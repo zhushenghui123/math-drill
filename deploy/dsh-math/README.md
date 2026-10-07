@@ -26,14 +26,26 @@
 4. **服务间凭据**：由控制台 token 派生（值不回显）→ `/home/mathdsh/.dsh/math-drill/agent-credential`（600）；
 5. **装单元并起服务**；访问走 SSH 隧道：`ssh -N -L 39195:127.0.0.1:39195 root@<服务器>` 后开那条带 token 的链接。
 
-## 已知缺口（**未完成**，见任务书）
+## 状态：**宿主半边与客户端半边都合规**（2026-10-07 复核翻案后更正）
 
-- **宿主半边 ✅**：`/math-drill/summary` 回真数据（今日题单/弱项/进度），三个只读工具已注册；
-- **客户端半边 ❌**：boot roster 里没有本插件、`/plugins/@math-drill/dsh-plugin/client.js` **404** ⇒
-  浏览器里**看不到状态条/小组件面板**。
-  已排除「缺包」（补包后现象不变）与「宿主太新」（0.1.1 私有前缀起不来、且 0.1.1 的 npm 树里也没有 ui-slots）。
-  ⇒ 待查 **0.1.2 如何枚举/挂载插件客户端半边**（`@deepseek-ai/dsh-client-modules` / `cordis-plugin-loader` / 生态声明样本）。
-  任务书：`~/workspaces/claude/任务-math-drill-DSH0.1.2客户端半边适配-20261007.md`。
+> ⚠️ **本节曾写错，留痕**：初稿写「客户端半边 ❌ 不被挂载」，依据是两条**测量假象**——
+> **(a)** 在 **303 空壳**响应上 grep（没跟重定向）⇒ 自然零命中；
+> **(b)** 用**单文件 URL** `/plugins/<包>/client.js` 取产物 —— 0.1.2 走**组合路由**，单文件 URL **按设计就 404**。
+> 另有一次没带 cookie jar（`?token=` 会下发会话 cookie，跟跳转后必须带上）⇒ 401。
+> **三次测量错三次，缺口是我造出来的。** 复核（`~/workspaces/claude/复核报告-math-drill-DSH0.1.2客户端半边适配-20261007.md`）
+> 逐行读通了 0.1.2 的客户端管线并翻案；我方复现如下。
+
+**正确的实测（可复跑，见文末命令）**：
+
+| 项 | 实测 |
+|---|---|
+| 整页（带 cookie 跟跳转） | **200 / 24573 B** |
+| boot 图是否含本插件 | **含**——组合路由里 `…,@math-drill/dsh-plugin/client.js,…&rev=12bbc973f5f1`，另有本插件自己的组合 `/plugins/??@math-drill/dsh-plugin/client.js&rev=6894edaa2d6f4e0f-45` |
+| 宿主半边 | `/math-drill/summary` 回真数据（今日题单/弱项/进度），三个只读工具已注册 |
+| 机械层结论 | 0.1.2 的 seed 表（`react`/`jsx-runtime`/`react-dom`/`cordis`/`store`/`ui-slots`/`ui-primitives` 等 8 个名字）把 `ui-slots`/`ui-primitives` 当**外壳内置词**而非 npm 包 ⇒ `setup.sh` 第 4 步对浏览器侧是空操作（`dsh-extra` 39 MB 疑似死重）；`inject` 里的悬空名**静默跳过、零影响**；两个槽位 key（`math_drill_*`）**不在占用表里**，加法式不冲突 |
+
+**还剩的唯一未验项（P0，30 分钟，需真浏览器）**：开一个对话后 `document.querySelectorAll('[data-math-drill]').length ≥ 1`
+—— ≥1 即关账；=0 才值得开新任务书，且嫌疑在**渲染/取数路径**，不在挂载契约。
 
 ## 备份与回滚
 
@@ -46,7 +58,10 @@
 ```bash
 systemctl is-active dsh-math.service dsh-web.service
 TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1 | cut -d= -f2)
-curl -s "http://127.0.0.1:39195/?token=$TOK" | grep -c '@math-drill/dsh-plugin'   # 期望 ≥1（当前 0 = 缺口）
-curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:39195/plugins/@math-drill/dsh-plugin/client.js?token=$TOK"
-curl -s "http://127.0.0.1:39195/math-drill/summary?token=$TOK" | head -c 80        # 宿主半边应 ok:true
+# ⚠️ 三条纪律（初稿就是在这里造出假象的）：① 必须带 cookie jar；② 必须跟跳转（-L）；③ 别用单文件 URL
+rm -f /tmp/cj; curl -sL -c /tmp/cj -b /tmp/cj -o /tmp/page.html -w '%{http_code} %{size_download}\n' \
+  "http://127.0.0.1:39195/?token=$TOK"                       # 期望 200 / ≈24.5 KB
+grep -c '@math-drill/dsh-plugin' /tmp/page.html              # 期望 ≥1（boot 图里含本插件）
+grep -o '/plugins/??[^"]*math-drill[^"]*' /tmp/page.html | head -2   # 真实（组合）路由长这样
+curl -s -b /tmp/cj "http://127.0.0.1:39195/math-drill/summary" | head -c 80   # 宿主半边应 ok:true
 ```
