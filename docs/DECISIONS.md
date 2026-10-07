@@ -501,8 +501,19 @@ Chandra 2 的「硬件闸门未验」升级为**已判定不适配**：实测为
   2. **多一个要维护的东西**（容器 + SQLite + 配置），换来的是不用自己发明会话/口令/防爆破/2FA。
   3. **网络拓扑有坑（实测踩过）**：`caddy-for-ols` 跑在 **host 网络**，解析不到容器名 ⇒ `forward_auth` 上游必须写
      **`127.0.0.1:9091`**（Authelia 发布在回环），不能写 `authelia:9091`；写错的表现是整站 **502**。
-  4. **数据隔离尚未生效**：本 ADR 只做"认证"，`attempts`/blob 仍是**全实例一份** ⇒ 多个用户登进来会看到同一份数据。
-     按决策人 D1（"每人一个独立控制台"）这属于**下一步**，本 ADR 明确登记为未完成项。
+  4. **数据隔离已落地三半（同日续做，2026-10-07 晚）**：本 ADR 只做认证，隔离是紧接着做的，
+     现状如下（三面：代码 / 文档 / 生产）——
+     · `attempts` / `agent_notes` 加 `user_id`（+步进迁移机制：`_MIGRATIONS`，这是本文件自己
+       警告过的"加列那天"），落账与读取都按用户（`97f9f2d`+`f6df262`）；
+     · **blob 按用户分文件**：owner 沿用历史 `blob.json`（**老数据零迁移**），其他人 `blob-<user>.json`（`eb8df99`）；
+     · **模块分发收口**：`UserScopedStore` 包在 `registry.dispatch(ctx=…)` 上，把用户注入到
+       `list_attempts/list_attempt_stats/record_attempt/record_note/get_blob/put_blob/put_settings`
+       七个方法 ⇒ 题库页的"做过/做错"也按用户算，**且不必改 10 个模块的签名**（`4bf62dc`）；
+     · **管理员映射**：`config/server.toml` 的 `[auth] owner_user = "zhu"` —— 历史数据挂在 `owner` 名下，
+       不映射就会出现"换了登录方式后自己看不见自己的进度"；生产已实测：模拟 Caddy 注入 `Remote-User: zhu`
+       回的就是原状态。
+     **仍未做（如实登记）**：agent 凭据仍是"实例唯一一把"（每人一把属后续）；题库本体是否每人一份拷贝
+     仍是**共享只读**（用户可见效果一致，等真有"某人要单独改题"再拷贝）。
   5. Authelia 4.38 起 `server.host/port` 已弃用（改 `server.address`），不处理只是启动时两条无害警告。
 - **与既有 ADR 的关系**：**收窄 ADR-011/§13.3**（凭据派生的那套仍服务于 agent/兜底，浏览器日常改由 Authelia 会话）；
   **不破** ADR-015 决策 3（域分离，agent 走 Bearer）、ADR-016（只读数据面与"不回他人数据"是下一步的事）、ADR-007。
