@@ -221,6 +221,18 @@ class Bridge:
             return "agent"
         return "anon"
 
+    def user_of(self, handler: BaseHTTPRequestHandler) -> str:
+        """当前请求属于**哪个用户**（多用户隔离的入口）。
+
+        · Caddy 过 Authelia 后注入 `Remote-User`（且只信回环来源）⇒ 就是那个人；
+        · 其余（浏览器兜底 cookie / 服务间 Bearer / 未鉴权）先一律归 `owner`
+          —— agent 凭据目前仍是"实例唯一一把"，每人一把属后续（ADR-021 代价 4）。
+        """
+        remote = handler.headers.get("Remote-User")
+        if remote and handler.client_address[0] == "127.0.0.1":
+            return remote.strip() or "owner"
+        return "owner"
+
     def bucket_key(self, handler: BaseHTTPRequestHandler) -> str:
         """限速桶键（§3.5）：已验证的服务间凭据用**哈希桶**（表内不存原文），其余按来源 IP。"""
         if self.identity(handler) == "agent":
@@ -267,7 +279,8 @@ class Bridge:
             return HTTPStatus.BAD_REQUEST, {"error": exc.code, "message": str(exc)}
 
         self.store.record_attempt(qid=qid, kid=row["kid"], result=result,
-                                  user_ms=payload.get("user_ms"), device=payload.get("device"))
+                                  user_ms=payload.get("user_ms"), device=payload.get("device"),
+                                  user=self.user_of(self))
         return HTTPStatus.OK, result
 
     def attempts_summary(self, *, days: int = 30, limit: int = 200) -> dict:
@@ -279,7 +292,8 @@ class Bridge:
         "能还原你几点在做题"的读面（评审 Q7②）。
         """
         since = time.time() - days * 86400
-        rows = [r for r in self.store.list_attempts() if float(r.get("ts") or 0) >= since]
+        rows = [r for r in self.store.list_attempts(user=self.user_of(self))
+                if float(r.get("ts") or 0) >= since]
         by_qid = {q["id"]: q for q in self.store.list_questions()}
         totals = {"n": len(rows), "correct": 0, "wrong": 0, "accuracy": None}
         kids: dict[str, dict] = {}

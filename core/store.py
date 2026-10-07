@@ -288,7 +288,8 @@ class Store:
     }
 
     def record_attempt(self, *, qid: str, kid: str | None, result: dict,
-                       user_ms: int | None = None, device: str | None = None) -> int:
+                       user_ms: int | None = None, device: str | None = None,
+                       user: str = "owner") -> int:
         """写入一条 attempt。**只接受 core.judge 的输出结构**（I5）。
 
         `result` 必须带 `verdict`；`correct` 由本方法按判决推导，客户端无法直接提交——
@@ -310,24 +311,28 @@ class Store:
 
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO attempts(ts, qid, kid, verdict, correct, user_ms, device) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (time.time(), qid, kid, verdict, correct, user_ms, device),
+                "INSERT INTO attempts(ts, qid, kid, verdict, correct, user_ms, device, user_id) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (time.time(), qid, kid, verdict, correct, user_ms, device, user or "owner"),
             )
             self.conn.commit()
             return int(cur.lastrowid)
 
-    def list_attempts(self, *, qid: str | None = None) -> list[dict]:
+    def list_attempts(self, *, qid: str | None = None, user: str | None = None) -> list[dict]:
+        """`user` 给了就只回该用户的记录（**多用户隔离**）；不给 = 全量（离线工具/迁移用）。"""
         sql = "SELECT * FROM attempts"
-        args: tuple = ()
+        where, args = [], []
         if qid:
-            sql += " WHERE qid = ?"
-            args = (qid,)
+            where.append("qid = ?"); args.append(qid)
+        if user:
+            where.append("user_id = ?"); args.append(user)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY id"
         with self._lock:
-            return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+            return [dict(r) for r in self.conn.execute(sql, tuple(args)).fetchall()]
 
-    def list_attempt_stats(self) -> list[dict]:
+    def list_attempt_stats(self, *, user: str | None = None) -> list[dict]:
         """按题聚合的只读视图：`[{qid, n, correct, first_ts, last_ts}, …]`。
 
         为什么在 SQL 里聚合：题库视图要回答"这题做了没有 / 对几次错几次"，
@@ -336,14 +341,16 @@ class Store:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT qid, COUNT(*) AS n, SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS correct,"
-                " MIN(ts) AS first_ts, MAX(ts) AS last_ts FROM attempts GROUP BY qid"
+                " MIN(ts) AS first_ts, MAX(ts) AS last_ts FROM attempts"
+                + (" WHERE user_id = ?" if user else "") + " GROUP BY qid",
+                ((user,) if user else ()),
             ).fetchall()
             return [dict(r) for r in rows]
 
     # ------------------------------------------------------------ agent 复盘（ADR-017）
     def record_note(self, *, qid: str, kind: str, summary: str, reason: str | None = None,
                     author: str = "agent", src: str = "offline", attempt_id: int | None = None,
-                    ts: float | None = None) -> int:
+                    ts: float | None = None, user: str = "owner") -> int:
         """写入一条 agent 复盘。**没有任何 HTTP 端点调它**（ADR-017 决策 2：写权仍关闭）。
 
         当前唯一调用方是离线灌库/本地演示；将来若给 agent 开写权，必须先按
