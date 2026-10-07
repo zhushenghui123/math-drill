@@ -353,7 +353,9 @@ class Handler(BaseHTTPRequestHandler):
 
         ⚠️ **必须抹掉 query 串**（2026-10-07 修，既存缺陷）：`/setup?t=<主 token>` 会把
         **主 token 明文**写进日志（实测生产日志 10 处、文件 0644，与 §13.3⑤「不记 token 值」相反）。
-        治本在这里（记不出原文），治标是 service 的 `LogFileMode=0640`。
+        治本在这里（记不出原文）；治标是 `/etc/tmpfiles.d/math-drill.conf` 的 0640（见 deploy/tmpfiles.d/）
+        —— ⚠️ **不是** unit 里的 `LogFileMode`：那个指令**不存在**（2026-10-07 复核 F1 实测
+        `systemd-analyze verify` 报 `Unknown key name`），写了等于没写、还会让 PID1 每次启动抱怨。
         不采用"只对 /setup 特判"：任何端点将来带敏感 query 都会同样泄漏，一律不记 query 更稳。
         """
         msg = fmt % args
