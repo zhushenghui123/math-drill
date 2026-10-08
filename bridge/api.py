@@ -222,7 +222,8 @@ class Bridge:
         if got and hmac.compare_digest(got, self.cookie_value):
             return "browser"
         bearer = self.bearer_of(handler)
-        if bearer and hmac.compare_digest(bearer, self.agent_value):
+        if bearer and (hmac.compare_digest(bearer, self.agent_value)        # 旧的实例级那把（归 owner）
+                       or self.store.user_of_agent_cred(bearer)):          # 每人一把（agent_creds）
             return "agent"
         return "anon"
 
@@ -230,8 +231,8 @@ class Bridge:
         """当前请求属于**哪个用户**（多用户隔离的入口）。
 
         · Caddy 过 Authelia 后注入 `Remote-User`（且只信回环来源）⇒ 就是那个人；
-        · 其余（浏览器兜底 cookie / 服务间 Bearer / 未鉴权）先一律归 `owner`
-          —— agent 凭据目前仍是"实例唯一一把"，每人一把属后续（ADR-021 代价 4）。
+        · 服务间 Bearer ⇒ **凭据的主人**（`agent_creds` 表，每人一把；旧的实例级那把仍是 `owner`）；
+        · 浏览器兜底 cookie / 未鉴权 ⇒ `owner`（兜底）。
         """
         remote = handler.headers.get("Remote-User")
         if remote and handler.client_address[0] == "127.0.0.1":
@@ -239,12 +240,19 @@ class Bridge:
             # ⚠️ 管理员映射到 `owner`：历史数据（attempts/blob）都挂在 owner 名下，
             # 不做这个映射 = 换成 Authelia 登录后**自己看不见自己的进度**（config: auth.owner_user）
             return "owner" if who == getattr(self.cfg, "owner_user", "owner") else who
+        bearer = self.bearer_of(handler)
+        if bearer:
+            who = self.store.user_of_agent_cred(bearer)
+            if who:
+                return "owner" if who == getattr(self.cfg, "owner_user", "owner") else who
         return "owner"
 
     def bucket_key(self, handler: BaseHTTPRequestHandler) -> str:
         """限速桶键（§3.5）：已验证的服务间凭据用**哈希桶**（表内不存原文），其余按来源 IP。"""
         if self.identity(handler) == "agent":
-            return "agent:" + hashlib.sha256(self.agent_value.encode("utf-8")).hexdigest()[:16]
+            # 用**请求里实际带的那把**凭据做桶键 ⇒ 每人一个桶（否则所有人共用一个桶、互相挤额度）
+            bare = self.bearer_of(handler) or self.agent_value
+            return "agent:" + hashlib.sha256(bare.encode("utf-8")).hexdigest()[:16]
         return "ip:" + handler.client_address[0]
 
     def authed(self, handler: BaseHTTPRequestHandler) -> bool:

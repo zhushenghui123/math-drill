@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -28,17 +29,30 @@ __all__ = ["ConflictError", "Store", "SCHEMA_VERSION"]
 
 #: 2 = 加 `agent_notes` 表（ADR-017）；3 = 加 `agent_difficulty` 表（ADR-018）；
 #: 4 = 加 `question_provenance` 旁表（ADR-019，语料题出处/题号来源/验证状态）；
-#: 5 = **加列**：`attempts.user_id` / `agent_notes.user_id`（多用户数据隔离第一步）。
+#: 5 = **加列**：`attempts.user_id` / `agent_notes.user_id`（多用户数据隔离第一步）；
+#: 6 = 加 `agent_creds` 表（**每人一把 agent 凭据**：服务间请求按凭据解出是"谁"）。
 #: **注意迁移现状**：本文件的 schema 变更至今
 #: **全是"加表"**，靠 `CREATE TABLE IF NOT EXISTS` 每次启动幂等地补上；**没有**真正的
 #: 步进迁移（加列/改类型没有机制）。故 `ensure_schema` 允许把已记录的版本号**前推**
 #: （见其 docstring）；哪天要加列，必须先补步进迁移，不许再靠这一手。
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: **步进迁移**：加列/改类型只能写在这里（`CREATE TABLE IF NOT EXISTS` 只能加表）。
 #: 键 = 目标版本；值 = 按序执行的 SQL；只在「库里记的版本 < 目标版本」时执行，
 #: **成功后才前推版本号** ⇒ 失败不会留下"版本说迁移了、结构其实没动"的假象。
 _MIGRATIONS: dict[int, list[str]] = {
+    6: [
+        # 每人一把 agent 凭据（多用户隔离的最后一个缺口）：**只存 sha256**，原文只在下发时出现一次
+        """CREATE TABLE IF NOT EXISTS agent_creds (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    TEXT    NOT NULL,
+            cred_hash  TEXT    NOT NULL UNIQUE,
+            label      TEXT,
+            created_at REAL    NOT NULL,
+            revoked_at REAL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_agent_creds_user ON agent_creds(user_id, id)",
+    ],
     5: [
         "ALTER TABLE attempts    ADD COLUMN user_id TEXT NOT NULL DEFAULT 'owner'",
         "ALTER TABLE agent_notes ADD COLUMN user_id TEXT NOT NULL DEFAULT 'owner'",
@@ -140,6 +154,15 @@ CREATE TABLE IF NOT EXISTS question_provenance (
     created_at        REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_question_provenance_verify ON question_provenance(verify);
+CREATE TABLE IF NOT EXISTS agent_creds (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT    NOT NULL,
+    cred_hash  TEXT    NOT NULL UNIQUE,
+    label      TEXT,
+    created_at REAL    NOT NULL,
+    revoked_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_creds_user ON agent_creds(user_id, id);
 """
 
 
@@ -389,6 +412,36 @@ class Store:
     def note_count(self) -> int:
         with self._lock:
             return int(self.conn.execute("SELECT COUNT(*) AS c FROM agent_notes").fetchone()["c"])
+
+    # ------------------------------------------------------------ 每人一把 agent 凭据（多用户隔离）
+    def set_agent_cred(self, *, user: str, raw: str, label: str | None = None) -> None:
+        """给某用户登记一把 agent 凭据（**只存 sha256**）。
+
+        重登即轮换：同一 user 已有的未吊销凭据会被置 `revoked_at`（append-only 表的常规用法）。
+        """
+        h = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        with self._lock:
+            self.conn.execute("UPDATE agent_creds SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+                              (time.time(), user))
+            self.conn.execute(
+                "INSERT INTO agent_creds(user_id, cred_hash, label, created_at) VALUES(?,?,?,?)",
+                (user, h, label, time.time()),
+            )
+            self.conn.commit()
+
+    def user_of_agent_cred(self, raw: str) -> str | None:
+        """凭据原文 → 用户 id（查不到或已吊销 ⇒ None）。
+
+        拿原文**算哈希再查表**：表里不存原文，也不做逐字节比对（哈希相等即命中）。
+        """
+        if not raw:
+            return None
+        h = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT user_id FROM agent_creds WHERE cred_hash=? AND revoked_at IS NULL", (h,)
+            ).fetchone()
+            return row["user_id"] if row else None
 
     def record_difficulty(self, *, qid: str, difficulty: int, reason: str | None = None,
                           author: str = "agent", src: str = "agent",
