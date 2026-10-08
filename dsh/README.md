@@ -17,16 +17,16 @@ dsh/
     ├── src/
     │   ├── index.js               # cordis 插件（宿主半边）：name / inject / Config / apply + 只读状态路由
     │   ├── credential.js          # 服务间凭据读取（0600 校验；**永不打印**）
-    │   ├── math-drill-api.js      # math-drill HTTP 客户端（读方法 + **唯一写方法** setDifficulty，ADR-018）
-    │   ├── shared/contract.js     # ★ 两半共用契约（STATE_PATH / schemaVersion / isStateResponse）
-    │   ├── summarize.js           # 纯函数核（无 harness 依赖 ⇒ 仓库内可直接测）
-    │   ├── client/index.ts        # 客户端半边（浏览器）：conversation.input.dock 状态条 + locale 字典
-    │   └── tools.js               # agent 面向的工具（三个只读 + 一个标难度；**剥掉答案**）
-    ├── build/web-platform.ts      # 平台模块表（快照；**升级宿主前必须重取**）
-    ├── tsdown.config.ts           # 客户端产物构建（镜像官方 clientConfig）
-    ├── tools/build-client.mjs     # 构建壳（调用本机已有 tsdown，不联网）
-    ├── lib/client.js              # ★ 构建产物（入仓；**改了 src/client 必须重跑 build**）
-    └── tests/                     # `node --test`（假上游 + 假 loader + 真断言；28 条）
+    │   ├── math-drill-api.js      # HTTP 客户端（四个读方法 + **两个写方法**：setDifficulty / writeNote，白名单可枚举）
+    │   ├── summarize.js           # 纯函数核（无 harness 依赖 ⇒ 仓库内可直接测；含"答案不进上下文"的剥离函数）
+    │   └── tools.js               # agent 面向的工具（三个只读 + 一个标难度 + 一个写复盘；**剥掉答案**）
+    └── tests/                     # `node --test`（假上游 + 假 loader + 真断言；23 条）
+```
+
+> ⚠️ **2026-10-08 收敛（ADR-024）**：**客户端半边整体删除** —— 状态条、小组件面板、`tsdown` 构建链、
+> 平台模块表、构建产物、两半共用的契约文件、以及只服务状态条的只读摘要路由，全部撤下。
+> 理由（决策人原话）：**展示都在控制台里，插件重复一遍是多余的**；插件只保留"替 agent 打通数据通路"。
+> 因此 `inject` 从 `['tools','webServer']` 收成 `['tools']`，`package.json` 去掉 `dsh.client` 与 lib 目录。
 ```
 
 ## 安装（本机 DSH）
@@ -95,29 +95,22 @@ chmod 600 ~/.dsh/math-drill/agent-credential
 | 决策 3 桥接鉴权（Bearer + 按凭据分桶） | `src/credential.js` + `src/math-drill-api.js`（`Authorization: Bearer …`） |
 | 决策 4 代码落点 | 本目录即 `dsh/` 顶层域 |
 | 决策 5 红线（判定链路无 LLM / 不进判定路径 / 不直写库） | `src/tools.js` **剥掉答案与解析**；写面在 2026-09-21 被 **ADR-018 收窄成白名单** —— 见下一行 |
-| **决策 5 的例外（ADR-018）** | 写动作**只允许一个**：`setDifficulty`（给题目标难度）⇒ `src/math-drill-api.js` 的 `WRITE_METHOD_NAMES = ['setDifficulty']`，测试断言这个集合不许长大。**写作答仍不直写库**（走判定端点） |
-| 决策 6 共享纪律（优先追加型槽位） | Phase B 的 UI 半边（见下） |
+| **决策 5 的例外（ADR-018 / ADR-023）** | 写动作**只允许两个**：`setDifficulty`（标难度）· `writeNote`（写复盘/评分）⇒ `src/math-drill-api.js` 的 `WRITE_METHOD_NAMES = ['setDifficulty','writeNote']`，测试断言这个集合不许长大。**写作答仍不直写库**（走判定端点） |
+| 决策 6 共享纪律（优先追加型槽位） | —— **已不适用**：客户端半边整体删除（ADR-024），插件不再注册任何槽位 |
 
 ## 分期（与 ADR-015 决策 2 一致）
 
 - **Phase A（已落地）**：宿主半边 —— 只读数据通路 + 三个 agent 只读工具（进度 / 今日题单 / 复盘）+ 只读状态路由；
   **2026-09-21 追加一个写工具**：`math_drill_set_difficulty`（把 agent 判定的难度写回题库，控制台按它显示）。
-- **Phase B（已落地，2026-09-19/20）**：客户端半边 —— `conversation.input.dock`（**追加位**）里的状态条；
-  文案走 `math-drill` locale 命名空间（zh/en 键对齐），样式只用 `--dsw-alias-*` 语义 token。
-  产物是 `window.__ModuleLoader__.load({id, factory})` 包装，由 `tsdown.config.ts` 构建（镜像官方 per-package 预设，
-  去掉我们用不到的 CSS Modules 段）。
-  ⚠️ **改了 `src/client/**` 必须重跑 `node tools/build-client.mjs`** —— 产物 `lib/client.js` 是入仓的、不会自己更新
-  （本轮吃过一次：改了源码没重建，测试立刻红）。
+- **Phase B（2026-09-19/20 落地 → **2026-10-08 删除**，ADR-024）**：曾经做过客户端半边
+  （`conversation.input.dock` 的状态条 + `lib/client.js` 产物 + tsdown 构建链 + 平台模块表）。
+  决策人拍板：**展示都在控制台里，插件重复一遍是多余的** ⇒ 整套撤下，插件只做数据面。
 - **工具卡片（C2，已落地）**：`math_drill_progress` / `math_drill_today` 的结果在对话里是卡片
   （keyed `tool.call.toolview`，key = wire 工具名）。**注意 keyed 命中会替换通用行** —— 卡片必须自己渲染输出。
 - **斜杠命令（C4，已落地）**：`/math`（进度）· `/math today`（今日题单）· 其它参数报用法。
   同样按"可选服务"处理：`ctx.get('commands')`，没有就只少一条命令，不拖住工具与路由。
-- **明确不做的**（2026-09-20 评审定案）：`dsh.client.immediately: true`（那是基础设施行专用）；
-  换槽位到 `conversation.composer.dock`（它带 `!hero` 守卫，会在"刚开新会话"时消失）。
-- ⚠️ **两条"别按一致性顺手改"的取舍**（详见 `math-drill-plugin/README.md` 的"已知取舍"节）：
-  ① `package.json` 的 `dsh.client.inject`（**包名边**，信息性）与 `src/client/index.ts` 的**运行期** `inject`
-  **故意不一致** —— 前者留着 `@deepseek-ai/dsh-client-locale` 是"我们碰过 locale 包"的唯一记录，删了就没线索；
-  ② `ctx.get('locale')` 是**一次性读取、不重试**：locale 晚到的宿主会**永久走中文回退**（面板照常出现，只是不跟随宿主语言）。
+- **已删除的展示面（不再有这些取舍）**：槽位选择、`immediately`、locale 回退时机、卡片 keyed 覆盖……
+  这些都随客户端半边一起撤下了；将来若真要重做，按当时的宿主契约重新引入（不要恢复旧产物）。
 - **0 号步 d**（ADR-015 分期）：先在这台笔记本上把 DSH 用起来，看 agent 到底帮不帮得上学习；
   插件只提供数据与工具，判断留给使用体验。
 

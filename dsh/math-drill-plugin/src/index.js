@@ -15,18 +15,18 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import z from '@deepseek-ai/schemastery'
 import { createMathDrillClient, MathDrillError } from './math-drill-api.js'
 import { CredentialError, DEFAULT_CREDENTIAL_RELATIVE_PATH, readCredential } from './credential.js'
-import { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
-import { summarizeBrief, summarizeDaily, summarizeProgress, summarizeWidgets } from './summarize.js'
+import { summarizeDaily, summarizeProgress } from './summarize.js'
 import { createMathDrillTools, MATH_DRILL_TOOL_NAMES, MATH_DRILL_WRITE_TOOL_NAMES } from './tools.js'
 
-export { stripQuestionAnswers, summarizeBrief, summarizeDaily, summarizeProgress, summarizeWidgets } from './summarize.js'
-export { STATE_PATH, STATE_SCHEMA_VERSION } from './shared/contract.js'
+export { stripQuestionAnswers, summarizeDaily, summarizeProgress, summarizeReview } from './summarize.js'
 
 /** cordis 诊断用的插件名（与 cordis.patch.yml 的 id 对应）。 */
 export const name = 'math-drill-dsh'
 
 /** 本插件需要的服务：工具面（agent 用）+ 宿主 web 服务器（客户端半边用）。其余数据面走 HTTP。 */
-export const inject = ['tools', 'webServer']
+// 只注入 `tools` —— **不再注入 webServer**：2026-10-08 起本插件收敛为「只做数据面」，
+// 浏览器那半边（状态条 / 小组件面板）整体移除（控制台本来就有全部展示，见 ADR-024）。
+export const inject = ['tools']
 
 /**
  * `/math` 斜杠命令的用法提示（也用于参数不认识时的报错文本）。
@@ -105,48 +105,6 @@ export async function apply(ctx, config) {
     ctx.effect(() => ctx.tools.register(tool), `${name}: tool ${tool.name}`)
   }
 
-  // 只读摘要路由：给浏览器里的状态条用。
-  // 为什么不让浏览器直连 math-drill：服务间凭据只应存在于宿主进程（凭据纪律）；
-  // 浏览器拿到的是**已经剥掉答案**的文本摘要。
-  // ⚠️ 方法名是 `register`（宿主 webserver 服务的真名，见 @deepseek-ai/dsh-host-webserver
-  //   的 `WebServer.register(route)`）；2026-09-19 我在这里猜成 `registerRoute`，
-  //   真实 profile **启动直接失败** —— 教训见 tests/wiring.test.mjs 的注释。
-  const route = {
-    kind: 'exact',
-    path: STATE_PATH,
-    handler: async (req, res) => {
-      if (req.method !== 'GET') {
-        res.writeHead(405, { 'content-type': 'application/json; charset=utf-8' })
-        res.end(JSON.stringify({ ok: false, error: '只支持 GET（本路由只读）' }))
-        return
-      }
-      res.setHeader('content-type', 'application/json; charset=utf-8')
-      res.setHeader('cache-control', 'no-store')
-      try {
-        const mathDrill = client()
-        const [state, daily, attempts, kp] = await Promise.all(
-          [mathDrill.state(), mathDrill.daily(), mathDrill.attempts(365), mathDrill.kp()])
-        res.writeHead(200)
-        res.end(JSON.stringify({
-          schemaVersion: STATE_SCHEMA_VERSION,
-          ok: true,
-          brief: summarizeBrief(state),
-          widgets: summarizeWidgets(state, attempts, kp),
-          text: `${summarizeProgress(state)}\n\n${summarizeDaily(daily)}`,
-          fetchedAt: Date.now(),
-        }))
-      } catch (error) {
-        // 失败也回 200 + ok:false：面板要把"怎么修"显示出来，而不是只显示一个红叉
-        res.writeHead(200)
-        res.end(JSON.stringify({
-          schemaVersion: STATE_SCHEMA_VERSION,
-          ok: false,
-          error: explain(error, resolved).message,
-        }))
-      }
-    },
-  }
-  ctx.effect(() => ctx.webServer.register(route), `${name}: ${STATE_PATH}`)
 
   // ---- `/math` 斜杠命令（C4）
   // 契约（本机 0.1.1-rc.1 逐字核过）：`ctx.commands.register({ name, description, input:{hint}, handler })`，

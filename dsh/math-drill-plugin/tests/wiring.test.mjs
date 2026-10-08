@@ -17,7 +17,6 @@ import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 
 import { apply, Config, inject, name } from '../src/index.js'
-import { STATE_PATH, STATE_SCHEMA_VERSION } from '../src/shared/contract.js'
 import { MATH_DRILL_TOOL_NAMES } from '../src/tools.js'
 // 真实契约的锚：桩（stub）不自己发明方法名，而是**照着真服务的原型**建。
 // 起因（2026-09-19 实拍）：我把 `ctx.webServer.register` 写成 `registerRoute`，
@@ -145,63 +144,23 @@ describe('插件接线（ADR-015 决策 1/5）', () => {
 
   it('导出 cordis 需要的 name / inject / Config / apply', () => {
     assert.equal(name, 'math-drill-dsh')
-    assert.deepEqual(inject, ['tools', 'webServer'])
+    assert.deepEqual(inject, ['tools'])   // 2026-10-08 收敛：不再注入 webServer（ADR-024）
     assert.ok(Config !== undefined, '要有 Config schema（补丁层靠它校验 config）')
     assert.equal(typeof apply, 'function')
   })
 
-  it('apply() 注册工具 + 一条只读摘要路由，并各挂一个 disposer', async () => {
+  it('apply() 注册工具（数据面），各挂一个 disposer', async () => {
     const ctx = fakeContext()
     await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'missing') })
     assert.deepEqual(registeredVia(ctx.toolCalls).map((tool) => tool.name), MATH_DRILL_TOOL_NAMES)
-    // 工具数 + 路由 + 命令，各一个 effect（卸载即注销）。数字跟着常量走，别写死。
-    assert.equal(ctx.effects.length, MATH_DRILL_TOOL_NAMES.length + 2)
+    // 工具数 + 命令，各一个 effect（卸载即注销）。数字跟着常量走，别写死。
+    assert.equal(ctx.effects.length, MATH_DRILL_TOOL_NAMES.length + 1)
     assert.deepEqual(registeredVia(ctx.commandCalls).map((command) => command.name), ['math'])
-    assert.deepEqual(registeredVia(ctx.serverCalls).map((route) => [route.kind, route.path]), [['exact', STATE_PATH]])
     for (const tool of registeredVia(ctx.toolCalls)) {
       assert.ok(tool.description.length > 20, '工具描述要够长，模型才知道何时用')
       assert.equal(typeof tool.execute, 'function')
       assert.ok(tool.parameters !== undefined && tool.output?.schema !== undefined)
     }
-  })
-
-  it('摘要路由：GET 回 ok:true 的文本；非 GET 回 405（只读的结构性保证）', async () => {
-    const path = join(credDir, 'credential-route')
-    writeFileSync(path, `${CREDENTIAL}\n`, { mode: 0o600 })
-    chmodSync(path, 0o600)
-    const ctx = fakeContext()
-    await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: path })
-    const route = registeredVia(ctx.serverCalls)[0]
-
-    const okResponse = fakeResponse()
-    await route.handler({ method: 'GET' }, okResponse)
-    assert.equal(okResponse.status, 200)
-    const payload = JSON.parse(okResponse.body)
-    assert.equal(payload.ok, true)
-    assert.equal(payload.schemaVersion, STATE_SCHEMA_VERSION, '响应必须带契约版本（评审 §B4 正解 (a)）')
-    assert.equal(typeof payload.brief, 'string', '响应要带一行简报（状态条用）')
-    assert.equal(payload.brief.includes('\n'), false, '简报必须是一行')
-    assert.match(payload.text, /考点：c1n1×1/)
-    assert.equal(payload.text.includes('三阶行列式'), false, '题面不进 DSH')
-    assert.equal(payload.text.includes(QUESTION.answer), false, '答案不得进浏览器')
-    assert.equal(payload.text.includes(CREDENTIAL), false, '凭据不得进浏览器')
-
-    const denied = fakeResponse()
-    await route.handler({ method: 'POST' }, denied)
-    assert.equal(denied.status, 405)
-    assert.equal(JSON.parse(denied.body).ok, false)
-  })
-
-  it('摘要路由：凭据没配时回 ok:false + 可操作消息（面板直接显示它）', async () => {
-    const ctx = fakeContext()
-    await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'missing-route') })
-    const response = fakeResponse()
-    await registeredVia(ctx.serverCalls)[0].handler({ method: 'GET' }, response)
-    assert.equal(response.status, 200)
-    const payload = JSON.parse(response.body)
-    assert.equal(payload.ok, false)
-    assert.equal(payload.schemaVersion, STATE_SCHEMA_VERSION)
-    assert.match(payload.error, /凭据/)
   })
 
   it('没配凭据：插件照常加载，工具报可操作的错（而不是崩宿主）', async () => {
@@ -281,13 +240,13 @@ describe('/math 斜杠命令（C4）', () => {
     assert.equal(result.text.includes(CREDENTIAL), false)
   })
 
-  it('宿主没有 commands 服务 ⇒ 工具与路由照常注册，只是少一条命令', async () => {
+  it('宿主没有 commands 服务 ⇒ 工具照常注册，只是少一条命令', async () => {
     const ctx = fakeContext()
     ctx.get = () => undefined                       // 模拟没有 commands 的宿主
     await apply(ctx, { baseUrl: upstream.baseUrl, credentialPath: join(credDir, 'x') })
     assert.equal(registeredVia(ctx.toolCalls).length, MATH_DRILL_TOOL_NAMES.length,
                  '工具必须照常注册（数量以常量真值为准，别在测试里写死数字）')
-    assert.equal(registeredVia(ctx.serverCalls).length, 1, '路由必须照常注册')
+    assert.equal(registeredVia(ctx.serverCalls).length, 0, '不再注册摘要路由（ADR-024 收敛）')
     assert.equal(registeredVia(ctx.commandCalls).length, 0, '没有服务就不注册命令')
   })
 })
