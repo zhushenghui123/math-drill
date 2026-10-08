@@ -1,0 +1,14 @@
+{
+  "name": "coach",
+  "phase": "1",
+  "enabled": true,
+  "rpc": [
+    "note",
+    "list"
+  ],
+  "blob_fields": [],
+  "deps": [
+    "core"
+  ],
+  "description": "agent 复盘写回（ADR-023，ADR-020 决策 1 的 agent 评分路径）：把 agent 读题面+作答+书上解答后给出的评语/评分落进 agent_notes（kind=grade/review，旁表，**不进 blob**）；note=写一条，list=按人读回"
+}

@@ -397,7 +397,7 @@ class UserScopedStore:
     """
 
     _USER_KW = ("list_attempts", "list_attempt_stats", "record_attempt", "record_note",
-                "get_blob", "put_blob", "put_settings")
+                "list_notes", "get_blob", "put_blob", "put_settings")
 
     def __init__(self, store, user: str) -> None:
         self._store = store

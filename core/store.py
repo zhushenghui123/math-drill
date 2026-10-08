@@ -76,6 +76,9 @@ _MIGRATIONS: dict[int, list[str]] = {
 }
 
 #: §3.5 的合并规则（真值副本在 contracts/blob_merge.md；两处不一致以那份为准）
+#: 复盘里属于**个人**的类型（只有本人看得到）；其余（如 `practiceable` 准入判定）是**题的属性**、全实例共享。
+PERSONAL_NOTE_KINDS = ("grade", "review")
+
 MERGE_RULES = {
     "cards": "newer_wins",
     "daily": "newer_wins",
@@ -413,25 +416,36 @@ class Store:
             raise ValueError("agent_notes 至少要 qid 与 summary")
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO agent_notes(qid, attempt_id, kind, summary, reason, author, src, ts) "
-                "VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO agent_notes(qid, attempt_id, kind, summary, reason, author, src, ts, user_id) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
                 (qid, attempt_id, kind, summary, reason, author, src,
-                 time.time() if ts is None else ts),
+                 time.time() if ts is None else ts, user or "owner"),
             )
             self.conn.commit()
             return int(cur.lastrowid)
 
-    def list_notes(self, *, qid: str | None = None) -> list[dict]:
-        """agent 复盘（按 id 升序；一次给全或按题过滤）。"""
-        sql = ("SELECT id, qid, attempt_id, kind, summary, reason, author, src, ts "
+    def list_notes(self, *, qid: str | None = None, user: str | None = None) -> list[dict]:
+        """agent 复盘（按 id 升序；一次给全或按题过滤）。
+
+        `user` 给了 ⇒ **按人过滤**：**个人类**复盘（`PERSONAL_NOTE_KINDS`，如 agent 给你的评分/评语）
+        只看自己的；**题类**（如 `practiceable` 的准入判定）全实例共享可见 —— 与 ADR-019/020 的口径一致：
+        准入是**题的属性**，评语是**人的账**。
+        """
+        sql = ("SELECT id, qid, attempt_id, kind, summary, reason, author, src, ts, user_id "
                "FROM agent_notes")
-        args: tuple = ()
+        where: list[str] = []
+        args: list = []
         if qid:
-            sql += " WHERE qid = ?"
-            args = (qid,)
+            where.append("qid = ?"); args.append(qid)
+        if user:
+            marks = ",".join("?" * len(PERSONAL_NOTE_KINDS))
+            where.append(f"(user_id = ? OR kind NOT IN ({marks}))")
+            args.append(user); args.extend(PERSONAL_NOTE_KINDS)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY id"
         with self._lock:
-            return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+            return [dict(r) for r in self.conn.execute(sql, tuple(args)).fetchall()]
 
     def note_count(self) -> int:
         with self._lock:

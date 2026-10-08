@@ -1,6 +1,6 @@
 {
   "name": "feedback",
-  "phase": "3",
+  "phase": "1",
   "enabled": true,
   "rpc": [
     "file",
@@ -10,5 +10,5 @@
   "deps": [
     "core"
   ],
-  "description": "报错回流（ADR-022）：做题时一键把 qid + 原因入修复队列（旁表 question_reports，不动 questions）。file = 写一条；list = 看未处理的（给管理员/后一批清洗用）"
+  "description": "报错回流（ADR-022，phase 1：与 qbank 落地时同样的改法——P3 预留窗口在实现时前移）：做题时一键把 qid + 原因入修复队列（旁表 question_reports，不动 questions）。file = 写一条；list = 看未处理的（给管理员/后一批清洗用）"
 }
