@@ -30,6 +30,7 @@ import json
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -141,10 +142,20 @@ def main(argv: list[str] | None = None) -> int:
 
     def do_batch(pair):
         base_idx, batch = pair
-        out = ask_model(base=args.base_url, key=key, model=args.model,
-                        max_output_tokens=args.max_output_tokens,
-                        input_text=build_prompt(batch), schema=SCHEMA)
-        return base_idx, out
+        # ⚠️ 上游偶发 502（实测：并发 16 时约 10/70 批）——**这里退避重试 3 次**，
+        # 否则那批题会静默变成"没判定"，得靠整体再跑一遍来补（本项目的已知坑形态）。
+        last: BaseException | None = None
+        for attempt in range(3):
+            try:
+                out = ask_model(base=args.base_url, key=key, model=args.model,
+                                max_output_tokens=args.max_output_tokens,
+                                input_text=build_prompt(batch), schema=SCHEMA)
+                return base_idx, out
+            except BaseException as exc:      # SystemExit / 网络 / 解析，一律重试
+                last = exc
+                if attempt < 2:
+                    time.sleep(4 * (attempt + 1))
+        raise last if last else RuntimeError("未知失败")
 
     with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
         futures = {pool.submit(do_batch, p): p for p in todo}
