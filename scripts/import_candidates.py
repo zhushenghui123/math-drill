@@ -72,6 +72,36 @@ def build_rows(bank: dict) -> tuple[list[dict], list[dict]]:
     return q_rows, p_rows
 
 
+#: agent 判定难度的合法值域（真值在 ADR-018 决策 4 与 `modules/qbank` 的 DIFF_MIN/DIFF_MAX）
+DIFF_MIN, DIFF_MAX = 1, 4
+
+
+def _record_agent_difficulty(store, bank: dict) -> int:
+    """把候选里的 `agent_difficulty` 写进 **append-only** 的 `agent_difficulty` 表（ADR-018）。
+
+    ⚠️ **必须幂等**：那张表是 append-only、读取取最新一条 ⇒ 若每次灌库都无条件追加，
+    重复跑一次就会多出一整套"难度被改过"的假历史（数值虽不变，账本被污染）。
+    故这里先取每人/每题的最新值，**只在不同才写**。
+    """
+    latest: dict[str, int] = {}
+    for r in store.conn.execute(
+        "SELECT qid, difficulty FROM agent_difficulty WHERE id IN "
+        "(SELECT MAX(id) FROM agent_difficulty GROUP BY qid)"
+    ):
+        latest[r["qid"]] = r["difficulty"]
+    n = 0
+    for q in bank["questions"]:
+        d = q.get("agent_difficulty")
+        if not isinstance(d, int) or not (DIFF_MIN <= d <= DIFF_MAX):
+            continue                      # 没有/越界的一律不写（越界由 ADR-018 兜：模块侧会 400）
+        if latest.get(q["qid"]) == d:
+            continue                      # 与最新一条相同 ⇒ 不重复追加
+        store.record_difficulty(qid=q["qid"], difficulty=d,
+                                reason=q.get("agent_difficulty_reason"),
+                                author="agent", src="offline:rate_practiceable")
+        n += 1
+    return n
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="语料候选 → 控制台库（questions + question_provenance）")
     ap.add_argument("--candidates", required=True)
@@ -84,7 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(args.data_dir)
     n_q = store.load_questions(q_rows)
     n_p = store.record_provenance(p_rows)
-    print(f"✅ 入库：questions {n_q} 行 · question_provenance {n_p} 行 → {args.data_dir}")
+    n_d = _record_agent_difficulty(store, bank)
+    print(f"✅ 入库：questions {n_q} 行 · question_provenance {n_p} 行 · agent 难度 {n_d} 条 → {args.data_dir}")
     counts = {s: sum(1 for r in p_rows if r["number_source"] == s) for s in ("ocr", "corrupted", "inferred")}
     print(f"   题号来源：{counts}")
     verify_counts = {s: sum(1 for r in p_rows if r["verify"] == s) for s in {r["verify"] for r in p_rows}}
