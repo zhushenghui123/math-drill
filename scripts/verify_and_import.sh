@@ -26,9 +26,21 @@ print(len(json.loads(p.read_text(encoding="utf-8"))["questions"]) if p.exists() 
 PY
 }
 
-judged() {  # 每本：已判定条数（partial jsonl 行数）
+judged() {  # 每本：已判定条数（**按唯一 idx 去重** —— 补跑会让同一批重复追加行）
   local f="data/candidates/$1.hybrid.kpid.rated.partial.jsonl"
-  [ -f "$f" ] && wc -l < "$f" || echo 0
+  [ -f "$f" ] || { echo 0; return; }
+  python3 - "$f" <<'PY'
+import json, sys
+seen = set()
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if line:
+        try:
+            seen.add(json.loads(line)["idx"])
+        except (ValueError, KeyError):
+            pass
+print(len(seen))
+PY
 }
 
 report() {
