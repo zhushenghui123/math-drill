@@ -86,6 +86,16 @@ console.log('\n=== web/js/qbank.js 题库浏览 ===');
      /params\.done\s*=\s*false/.test(qbankSrc) && /params\.wrong\s*=\s*true/.test(qbankSrc));
   // 复核 S2 的"半格"：上面只钉住字段被设置，把 qbankList(params) 换成 qbankList() 仍会绿 ⇒ 补这一行锚
   ok('params 真的被传出去（不是设了字段却用空参请求）', /qbankList\(params\)/.test(qbankSrc));
+  // 第三维筛选：按考点（后端 list 的 kid 参数一直有，缺的是入口）
+  ok('考点筛选：选中后把 kid 传给服务端', /params\.kid\s*=\s*qbKid/.test(qbankSrc));
+  ok('考点筛选：考点条渲染出来（用服务端 groups[].kids，不在前端自己算）',
+     /html \+= kidBar\(g\)/.test(qbankSrc) && /g\.kids/.test(qbankSrc));
+  ok('考点筛选：再点一次同一个 = 取消（与"未做/做错"同一套交互）',
+     /qbKid = \(qbKid === kid\) \? null : kid/.test(qbankSrc) && typeof qb.setKid === 'function');
+  ok('考点是章内的：换章要清空考点筛选',
+     /qbLast\.chapter !== chapter\) \{ qbKid = null/.test(qbankSrc));
+  ok('考点筛选下的空状态有专门文案（不跟"这个类型还没有题"混）',
+     /这个考点下没有符合条件的题/.test(qbankSrc));
   ok('难度来源标记：agent 评过的题要标出来', /difficultySource === 'agent'/.test(qbankSrc)
      && /agent 评/.test(qbankSrc));
   ok('学科中文名从知识树取（不在 qbank.js 里另立一套）',

@@ -241,11 +241,35 @@
      路由是 app.js 调的（MDQbank.pageChapter(subject, chapter)，只有两个参数），
      多传一个参数就得改 app.js 的解析，收益不值这个风险。 */
   var qbFilter = null;      // null（全部）| 'undone' | 'wrong'
+  var qbKid = null;         // 选中的**考点**（kid）；null = 该章的「全部考点」
   var qbLast = null;        // { subject, chapter } —— 供切换筛选后原地重绘
 
   function setFilter(f) {
     qbFilter = (qbFilter === f) ? null : f;   // 再点一次同一个按钮 = 取消筛选
     if (qbLast) { pageChapter(qbLast.subject, qbLast.chapter); }
+  }
+
+  /* 考点筛选（第三维）：后端 `list` 的 `kid` 参数一直就有，缺的是入口（ADR-017 的类型页只做了题目类型）。
+     考点是**章内**的概念 ⇒ 换章时清空（见 pageChapter 开头）。 */
+  function setKid(kid) {
+    qbKid = (qbKid === kid) ? null : kid;     // 再点一次同一个 = 取消
+    if (qbLast) { pageChapter(qbLast.subject, qbLast.chapter); }
+  }
+
+  function kidBar(g) {
+    var kids = (g.kids || []).filter(function (k) { return k.total > 0; });
+    if (kids.length < 2) return '';            // 只有一个考点就没有"筛"的意义
+    function chip(kid, label, total) {
+      var on = (qbKid === kid)
+        ? ' style="border-color:var(--amber);color:var(--amber)"' : '';
+      var arg = kid ? "'" + esc(kid) + "'" : 'null';
+      return '<button class="btn"' + on + ' onclick="MDQbank.setKid(' + arg + ')">' + esc(label) +
+        (total == null ? '' : '<i style="opacity:.6;margin-left:4px">' + total + '</i>') + '</button>';
+    }
+    return '<div class="mt16" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<span style="color:var(--ink-3);font-size:13px">按考点</span>' +
+      chip(null, '全部考点', null) +
+      kids.map(function (k) { return chip(k.kid, k.title || k.kid, k.total); }).join('') + '</div>';
   }
 
   function filterBar() {
@@ -266,10 +290,12 @@
   function pageChapter(subject, chapter) {
     var host = main();
     host.innerHTML = shell().head(chapter, '载入题库…');
+    if (qbLast && qbLast.chapter !== chapter) { qbKid = null; }   // 考点是**章内**的：换章即清空
     qbLast = { subject: subject, chapter: chapter };
     var params = { subject: subject, chapter: chapter, limit: NAV_LIMIT };
     if (qbFilter === 'undone') { params.done = false; }
     if (qbFilter === 'wrong') { params.wrong = true; }
+    if (qbKid) { params.kid = qbKid; }        // 第三维：按考点
     api().qbankList(params).then(function (d) {
       if (!subjectsCache) { subjectsCache = d.subjects || []; fillNav(subjectsCache); }
       var g = (d.groups || []).filter(function (x) { return x.chapter === chapter; })[0] ||
@@ -285,9 +311,10 @@
         accuracy: g.accuracy || 0, attempts: g.attempts || 0,
       });
       html += filterBar();
+      html += kidBar(g);
       if (!items.length) {
         html += '<div class="card mt16"><div class="card-title">' +
-          (qbFilter ? '没有符合条件的题' : '这个类型还没有题') + '</div>' +
+          (qbKid ? '这个考点下没有符合条件的题' : (qbFilter ? '没有符合条件的题' : '这个类型还没有题')) + '</div>' +
           '<div style="color:var(--ink-3);font-size:13px;line-height:1.7">' +
           (qbFilter
             ? '换个筛选看看，或点「全部」。<br>⚠️「做错」= 做过但**从没做对过**（系统不存作答原文，判不了"最后一次做错"）。'
@@ -456,6 +483,7 @@
     pageSubject: pageSubject,
     pageChapter: pageChapter,
     setFilter: setFilter,
+    setKid: setKid,
     report: report,
     pageQuestion: pageQuestion,
     loadSubjects: loadSubjects,
