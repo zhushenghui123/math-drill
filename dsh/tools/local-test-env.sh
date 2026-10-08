@@ -90,15 +90,16 @@ stop() {
 check() {
   local base="http://127.0.0.1:$PORT"
   say "--- 冒烟检查 $base ---"
-  if ! curl -sf -o /dev/null "$base/"; then
-    say "❌ 服务没在跑（先 start）"; return 1
+  # ⚠️ 存活判据不是"首页 2xx"：DSH 的 web UI 要 token ⇒ 首页常回 401/303（那也是"活着"）。
+  # 只有"连不上"（curl 退出码非 0 / 000）才判没起来 —— 2026-10-08 修（此前误报过"服务没在跑"）。
+  local root_code
+  root_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$base/" || echo 000)"
+  if [ "$root_code" = "000" ]; then
+    say "❌ 连不上（先 start）"; return 1
   fi
-  say "✅ 首页 200"
-  if curl -s "$base/" | grep -q "@math-drill/dsh-plugin"; then
-    say "✅ boot roster 里有我们的插件"
-  else
-    say "⚠️ boot roster 里没找到我们的插件（组合或构建出了问题）"
-  fi
+  say "✅ 服务有响应（首页 HTTP $root_code；DSH 首页要 token，401/303 属正常）"
+  # boot roster 的探测同样需要 token（未带 token 时页面回 401、拿不到 HTML）⇒ 不再据此下结论，
+  # 权威判据是下面那条 `--dump-config`（工具是宿主侧注册的，组合树里有即已加载）。
   # ⚠️ 2026-10-08（ADR-024）：**客户端半边已删除** ⇒ 不再有 `/plugins/.../client.js` 可探，
   # 也没有只给状态条用的 `/math-drill/summary` 路由。这里改成验**宿主半边的组合**：
   # 插件进没进 `--dump-config`（工具是宿主侧注册的，组合树里出现即说明插件被加载）。
