@@ -559,6 +559,8 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │                                  #     · normalize_candidates.py（题号归一 + qid 重建成阅读序 s0001…）· clean_stems.py（**题面/解析清洗**：页眉·水印·表格标签·`<eq>`·不平衡 `$`，规格见 DATA_PIPELINE §10）
 │                                  #     · rate_practiceable.py（④.b 可练性判定 ⇒ verify=agent_rated，ADR-020）· import_candidates.py（灌库：questions + question_provenance 旁表）
 ├── deploy/                        # math-drill.service / caddy.block / backup.timer + backup.service（timer 必须配对 oneshot）/ logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
+│   ├── authelia/                  # ★ 边缘鉴权（ADR-021）：服务器文件布局 / docker run 命令 / 开户改密 / 回滚（README 只有模板，密钥与用户文件永不入仓）
+│   └── dsh-math/                  # ★ 服务器上的「数学 DSH」实例：README（形态表 · 已知缺口更正 · 复验命令）+ dsh-math.service + setup.sh（幂等脚本）
 ├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE
 │                                  #   / MODULE_TEMPLATE / IMPLEMENTATION_BRIEF / DECISIONS
 ├── data/                          # 运行时数据（.gitignore：data/、*.db、*.db-wal）

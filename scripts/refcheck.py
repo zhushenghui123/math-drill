@@ -196,6 +196,30 @@ def _tree_entries(docs: Path) -> tuple[set[str], set[str]]:
 
 # ---------------------------------------------------------------- C1
 
+def check_c4(repo: Path, docs: Path) -> list[str]:
+    """C4 部署件入树：`deploy/` 下的**顶层条目**（文件或子目录）必须在 §11.9 树里被点名。
+
+    为什么单列一条：C1 的两个方向都扫不到"磁盘上新增了部署件、树里没写"——
+    2026-10-07 复核实测 **`deploy/` 零护栏**（`authelia/` 与 `dsh-math/` 都是先落盘、
+    后靠人眼发现没入树）。约定的粒度是**目录/文件级**：登记了 `deploy/dsh-math` 就不再逐个
+    要求它的内部文件（内部文件由 C1 的"树里点名的要在磁盘上"反向兜）。
+    """
+    problems: list[str] = []
+    deploy = repo / "deploy"
+    if not deploy.is_dir():
+        return problems
+    arch = (docs / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    for entry in sorted(deploy.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        rel = f"deploy/{entry.name}"
+        # 树里可以写成 `deploy/dsh-math/`、`deploy/dsh-math`、或把名字写在 deploy 那行的注释里（如 caddy.block）
+        if rel in arch or f"{rel}/" in arch or entry.name in arch:
+            continue
+        problems.append(f"C4 部署件未入真值树：`{rel}`（先写进 ARCHITECTURE §11.9 的 deploy 段，再落盘）")
+    return problems
+
+
 def check_c1(repo: Path, docs: Path) -> list[str]:
     problems: list[str] = []
     tree_names, tree_files = _tree_entries(docs)
@@ -490,6 +514,21 @@ def selftest() -> int:
         if not c1:
             failures.append("A：引用不存在的路径却没报红")
     with tempfile.TemporaryDirectory() as td:
+        # fixture F：deploy/ 下有未入树的部署件 → C4 必须红
+        repo = _fixture(Path(td))
+        (repo / "deploy" / "ghost-service").mkdir(parents=True, exist_ok=True)
+        (repo / "deploy" / "ghost-service" / "unit.service").write_text("[Unit]\n", encoding="utf-8")
+        c4 = check_c4(repo, repo / "docs")
+        print(f"[selftest F] C4 命中 {len(c4)} 条（期望 >0）")
+        if not c4:
+            failures.append("F：部署件没入树却没报红")
+        # 反向：把它登记进树后应转绿
+        arch = repo / "docs" / "ARCHITECTURE.md"
+        arch.write_text(arch.read_text(encoding="utf-8") + "\n`deploy/ghost-service/`\n", encoding="utf-8")
+        if check_c4(repo, repo / "docs"):
+            failures.append("F：登记后仍报红（假阳性）")
+
+    with tempfile.TemporaryDirectory() as td:
         # fixture B：同一单源值写两处且不一致 → C2 必须红
         bad = TINY_TREE.replace('port = 8081', 'port = 9999')
         repo = _fixture(Path(td), tree=bad,
@@ -513,7 +552,7 @@ def selftest() -> int:
         for f in failures:
             print("   -", f)
         return 1
-    print("\n✅ 自测通过：五类负例都能被逮住（A→C1、B→C2、C→C3、D/E→C2b 端点名单与计数短语）")
+    print("\n✅ 自测通过：六类负例都能被逮住（A→C1 引用缺树 · B→C2 单源不一致 · C→C3 自陈数字 · D/E→C2b 端点名单与计数短语 · F→C4 部署件未入树，含假阳性反向）")
     return 0
 
 
@@ -531,13 +570,14 @@ def main(argv: list[str] | None = None) -> int:
     docs = repo / "docs"
     fork = Path("/home/myuser/workspaces/DeepSeek/math-practice-survey/clones/kaoyan-math-tutor")
 
-    problems = check_c1(repo, docs) + check_c2(repo, docs) + check_c2b(repo) + check_c3(repo, docs, fork)
+    problems = (check_c1(repo, docs) + check_c2(repo, docs) + check_c2b(repo)
+                + check_c3(repo, docs, fork) + check_c4(repo, docs))
     if problems:
         print(f"❌ refcheck 发现 {len(problems)} 个问题：")
         for p in problems:
             print("  -", p)
         return 1
-    print("✅ refcheck 全绿：C1 树↔契约 · C2 单源值 · C3 自陈数字")
+    print("✅ refcheck 全绿：C1 树↔契约 · C2 单源值 · C3 自陈数字 · C4 部署件入树")
     return 0
 
 
