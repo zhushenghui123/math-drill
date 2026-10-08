@@ -35,7 +35,10 @@ from scripts.segment_corpus import PROFILES, _block_text, _iter_blocks  # noqa: 
 __all__ = ["build_windows", "ask_model", "main"]
 
 DEFAULT_BASE = "http://127.0.0.1:18766/go/v1"      # 本机 codex-proxy（OpenCode GO 的本地网关）
-DEFAULT_MODEL = "deepseek-v4.1-flash"              # ⚠️ 决策人限定：只用这一个
+DEFAULT_MODEL = "deepseek-v4.1-flash"              # 默认模型
+#: **唯一放行的模型白名单**（2026-10-08 决策人批准加入免费模型 LongCat）：
+#: 别的模型可能很贵 ⇒ 这里只放行这两个，其余一律拒绝。
+ALLOWED_MODELS = (DEFAULT_MODEL, "longcat-2.5-preview-free")
 
 #: 模型只回这几样：题的编号 + 哪些块是题干 + 哪些块是解答 + 置信度。
 #: **不给它自由发挥的余地** —— strict schema，块号用整数数组，越界即判无效。
@@ -224,8 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     key = os.environ.get(args.key_env)
     if not key:
         raise SystemExit(f"环境变量 {args.key_env} 没设置（凭据不进仓库、不进会话）")
-    if args.model != DEFAULT_MODEL:
-        raise SystemExit(f"只允许用 {DEFAULT_MODEL}（决策人限定，别的模型可能很贵）")
+    if args.model not in ALLOWED_MODELS:
+        raise SystemExit(f"只允许用 {ALLOWED_MODELS}（决策人限定，别的模型可能很贵）")
 
     results, usage_total = [], {"input_tokens": 0, "output_tokens": 0}
     failures = []

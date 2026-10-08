@@ -36,7 +36,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from scripts.segment_ab import DEFAULT_BASE, DEFAULT_MODEL, ask_model  # noqa: E402
+from scripts.segment_ab import ALLOWED_MODELS, DEFAULT_BASE, DEFAULT_MODEL, ask_model  # noqa: E402
 
 __all__ = ["PROMPT", "SCHEMA", "main"]
 
@@ -133,8 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     key = os.environ.get(args.key_env)
     if not key:
         raise SystemExit(f"环境变量 {args.key_env} 没设置")
-    if args.model != DEFAULT_MODEL:
-        raise SystemExit(f"只允许用 {DEFAULT_MODEL}（决策人限定）")
+    if args.model not in ALLOWED_MODELS:
+        raise SystemExit(f"只允许用 {ALLOWED_MODELS}（决策人限定）")
     print(f"待判定 {len(todo)} 批（每批 {args.batch} 题）· 共 {len(questions)} 题")
 
     lock = threading.Lock()
