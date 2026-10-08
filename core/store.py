@@ -31,16 +31,30 @@ __all__ = ["ConflictError", "Store", "SCHEMA_VERSION"]
 #: 4 = 加 `question_provenance` 旁表（ADR-019，语料题出处/题号来源/验证状态）；
 #: 5 = **加列**：`attempts.user_id` / `agent_notes.user_id`（多用户数据隔离第一步）；
 #: 6 = 加 `agent_creds` 表（**每人一把 agent 凭据**：服务间请求按凭据解出是"谁"）。
+#: 7 = 加 `question_reports` 表（**报错回流队列**：做题时一键报坏题，ADR-022）。
 #: **注意迁移现状**：本文件的 schema 变更至今
 #: **全是"加表"**，靠 `CREATE TABLE IF NOT EXISTS` 每次启动幂等地补上；**没有**真正的
 #: 步进迁移（加列/改类型没有机制）。故 `ensure_schema` 允许把已记录的版本号**前推**
 #: （见其 docstring）；哪天要加列，必须先补步进迁移，不许再靠这一手。
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: **步进迁移**：加列/改类型只能写在这里（`CREATE TABLE IF NOT EXISTS` 只能加表）。
 #: 键 = 目标版本；值 = 按序执行的 SQL；只在「库里记的版本 < 目标版本」时执行，
 #: **成功后才前推版本号** ⇒ 失败不会留下"版本说迁移了、结构其实没动"的假象。
 _MIGRATIONS: dict[int, list[str]] = {
+    7: [
+        # 报错回流队列（ADR-022）：**旁表**，不给 questions 加列（ADR-019 的同一条纪律）
+        """CREATE TABLE IF NOT EXISTS question_reports (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            qid        TEXT    NOT NULL,
+            user_id    TEXT    NOT NULL DEFAULT 'owner',
+            kind       TEXT    NOT NULL,
+            note       TEXT,
+            status     TEXT    NOT NULL DEFAULT 'open',
+            created_at REAL    NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_question_reports_status ON question_reports(status, id)",
+    ],
     6: [
         # 每人一把 agent 凭据（多用户隔离的最后一个缺口）：**只存 sha256**，原文只在下发时出现一次
         """CREATE TABLE IF NOT EXISTS agent_creds (
@@ -163,6 +177,16 @@ CREATE TABLE IF NOT EXISTS agent_creds (
     revoked_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_creds_user ON agent_creds(user_id, id);
+CREATE TABLE IF NOT EXISTS question_reports (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    qid        TEXT    NOT NULL,
+    user_id    TEXT    NOT NULL DEFAULT 'owner',
+    kind       TEXT    NOT NULL,
+    note       TEXT,
+    status     TEXT    NOT NULL DEFAULT 'open',
+    created_at REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_question_reports_status ON question_reports(status, id);
 """
 
 
@@ -414,6 +438,28 @@ class Store:
             return int(self.conn.execute("SELECT COUNT(*) AS c FROM agent_notes").fetchone()["c"])
 
     # ------------------------------------------------------------ 每人一把 agent 凭据（多用户隔离）
+    def record_report(self, *, qid: str, kind: str, note: str | None = None,
+                      user: str = "owner") -> int:
+        """把一条"这题有问题"的记录入队（ADR-022）。**旁表**，不动 `questions`（ADR-019 同纪律）。"""
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO question_reports(qid, user_id, kind, note, status, created_at)"
+                " VALUES(?,?,?,?,'open',?)",
+                (qid, user or "owner", kind, note, time.time()),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
+
+    def list_reports(self, *, status: str = "open", limit: int = 200) -> list[dict]:
+        """修复队列（默认只看未处理的），按入队顺序。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, qid, user_id, kind, note, status, created_at FROM question_reports"
+                " WHERE status = ? ORDER BY id LIMIT ?",
+                (status, max(1, int(limit))),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def set_agent_cred(self, *, user: str, raw: str, label: str | None = None) -> None:
         """给某用户登记一把 agent 凭据（**只存 sha256**）。
 

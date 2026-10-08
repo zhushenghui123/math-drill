@@ -224,6 +224,20 @@
       return moduleGet('/m/qbank/detail', ['qid=' + encodeURIComponent(qid)], '题目载入失败');
     },
 
+    /* 报错回流（ADR-022）：做题时一键把"这题有问题"入队。
+       POST /m/feedback/file —— 入参 qid + kind（stem/answer/ocr/other）+ 可选 note。
+       模块路由的 POST 也走同一个 `request` 出口（唯一 HTTP 出口这条纪律不破）。 */
+    feedbackFile: function (opts) {
+      opts = opts || {};
+      return request('POST', '/m/feedback/file', opts).then(function (r) {
+        if (r.status === 200 && r.data) return r.data;
+        var err = new Error((r.data && (r.data.message || r.data.error)) || ('报错失败 HTTP ' + r.status));
+        err.code = r.data && r.data.error;
+        err.status = r.status;
+        throw err;
+      });
+    },
+
     /* 同步状态订阅（给 index.html 的状态灯用） */
     onChange: function (fn) { listeners.push(fn); try { fn(status()); } catch (e) { /* 忽略 */ } },
     status: status

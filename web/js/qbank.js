@@ -337,6 +337,40 @@
     });
   }
 
+  /* 报错回流（ADR-022）：一键把"这题有问题"入队 —— 数据管线的反哺入口。
+     三种原因与后端 `modules/feedback/module.py` 的 KINDS 白名单**同一套键**。 */
+  var REPORT_KINDS = [
+    ['stem', '题干有误'],
+    ['answer', '答案/解析有误'],
+    ['ocr', 'OCR 噪声']
+  ];
+
+  function reportButtons(qid) {
+    return '<div class="mt16" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<span style="color:var(--ink-3);font-size:13px">这题有问题？</span>' +
+      REPORT_KINDS.map(function (kv) {
+        return '<button class="btn" data-qb-report="' + esc(kv[0]) + '"' +
+          ' onclick="MDQbank.report(\'' + esc(qid).replace(/'/g, "\\'") + '\',\'' + esc(kv[0]) + '\')">' +
+          esc(kv[1]) + '</button>';
+      }).join('') +
+      '<span id="qb-report-msg" style="color:var(--ink-3);font-size:12px"></span></div>';
+  }
+
+  function report(qid, kind) {
+    var msg = document.getElementById('qb-report-msg');
+    function say(text) { if (msg) msg.textContent = text; }
+    say('提交中…');
+    api().feedbackFile({ qid: qid, kind: kind }).then(function () {
+      say('✅ 已记入修复队列（' + (KIND_LABEL[kind] || kind) + '）——谢谢！');
+      var btns = document.querySelectorAll('[data-qb-report]');
+      for (var i = 0; i < btns.length; i++) btns[i].disabled = true;
+    }).catch(function (e) {
+      say('❌ ' + ((e && (e.message || e.code)) || '提交失败'));
+    });
+  }
+
+  var KIND_LABEL = { stem: '题干有误', answer: '答案/解析有误', ocr: 'OCR 噪声' };
+
   function detailHtml(d) {
     var q = d.question || {};
     var html = shell().head(
@@ -344,6 +378,8 @@
       (q.chapter ? esc(q.chapter) + ' · ' : '') + '题号 ' + esc(q.qid),
       '<button class="btn" onclick="location.hash=\'#/s/' + encodeURIComponent(q.subject) + '\'">返回栏目</button>'
     );
+
+    html += reportButtons(q.qid);
 
     /* 题面卡：**没做过也完整给** —— 题目本身不是答案 */
     html += '<div class="card qb-question">' +
@@ -420,6 +456,7 @@
     pageSubject: pageSubject,
     pageChapter: pageChapter,
     setFilter: setFilter,
+    report: report,
     pageQuestion: pageQuestion,
     loadSubjects: loadSubjects,
     fillNav: fillNav,

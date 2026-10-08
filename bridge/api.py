@@ -579,6 +579,9 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self._read_json()
                 payload.update({k: (v[-1] if isinstance(v, list) and v else v)
                                 for k, v in query.items()})
+                # 把"当前是谁"交给模块（保留键 `_user`）——放在合并之后 ⇒ **客户端传同名值会被覆盖**，
+                # 不能靠它冒充别人。模块（ADR-022 的 feedback）需要它做归属。
+                payload["_user"] = b.user_of(self)
                 try:
                     out = b.registry.dispatch(key, rpc, payload,
                                               ctx=UserScopedStore(b.store, b.user_of(self)))

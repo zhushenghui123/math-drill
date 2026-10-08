@@ -1,0 +1,14 @@
+{
+  "name": "feedback",
+  "phase": "3",
+  "enabled": true,
+  "rpc": [
+    "file",
+    "list"
+  ],
+  "blob_fields": [],
+  "deps": [
+    "core"
+  ],
+  "description": "报错回流（ADR-022）：做题时一键把 qid + 原因入修复队列（旁表 question_reports，不动 questions）。file = 写一条；list = 看未处理的（给管理员/后一批清洗用）"
+}
