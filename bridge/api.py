@@ -43,6 +43,7 @@ from contracts.answer_types import ErrorCode
 from core.judge import JudgeError, judge
 from core.registry import Registry
 from core.store import ConflictError, Store
+from core.picker import pick as pick_daily
 
 REPO = Path(__file__).resolve().parent.parent
 SESSION_MSG = b"md-session-v1"
@@ -64,6 +65,7 @@ class Config:
     setup_max_failures: int
     setup_window_seconds: int
     owner_user: str = "owner"
+    tau_days: int = 10
 
 
 def load_config(repo: Path | str = REPO) -> Config:
@@ -78,6 +80,7 @@ def load_config(repo: Path | str = REPO) -> Config:
         setup_max_failures=int(r["setup_max_failures"]),
         setup_window_seconds=int(r["setup_window_seconds"]),
         owner_user=a.get("owner_user", "owner"),
+        tau_days=int(c.get("picker", {}).get("tau_days", 10)),
     )
 
 
@@ -355,20 +358,23 @@ class Bridge:
             q["analysis"] = row["analysis"] or ""
         return q
 
-    def daily_questions(self, limit: int = 8, *, with_answer: bool = True) -> list[dict]:
-        """当日题单：**同一天同一批**（按日期确定性选择），够用且可复现。
+    def daily_questions(self, limit: int = 8, *, with_answer: bool = True,
+                        user: str = "owner") -> list[dict]:
+        """当日题单：交给 `modules/picker` 选（按天确定 · 跨章铺开 · 先新后旧 · 错题回炉）。
 
-        为什么先这么简单：Phase 1 的目标是"能稳定做题"，真正的选题器是 P2b 的 `modules/picker`。
-        这里不引入复杂度，只保证「今天这 8 题今天不变」。
+        端点只做两件事：**取数**（练习池 + **该用户**的作答统计 + 考点表）与**包装**（`_question_json`）。
+        选题逻辑在模块里（`modules/picker/module.py`），有自己的性质测试；`tau_days` 来自配置（单源）。
         """
         # ADR-019 决策 4：**未审核的语料题不进练习池**。练习池 = practice_pool()（排除 verify='unverified'），
         # 而 `list_questions()` 仍给"题库栏目"用 —— "看得见"与"能拿来练"是两条不同的门。
         rows = self.store.practice_pool()
         if not rows:
             return []
-        seed = int(hashlib.sha1(date.today().isoformat().encode("utf-8")).hexdigest()[:8], 16)
-        start = seed % len(rows)
-        picked = [rows[(start + i) % len(rows)] for i in range(min(limit, len(rows)))]
+        stats = {r["qid"]: r for r in self.store.list_attempt_stats(user=user)}
+        kp = {r["id"]: {"chapter": r["chapter"], "subject": r["subject"]}
+              for r in self.store.conn.execute("SELECT id, chapter, subject FROM kp")}
+        picked = pick_daily(rows, stats=stats, kp=kp, limit=limit,
+                            today=date.today(), tau_days=self.cfg.tau_days)
         return [self._question_json(r, with_answer=with_answer) for r in picked]
 
 
@@ -519,7 +525,8 @@ class Handler(BaseHTTPRequestHandler):
                 with_answer = b.identity(self) == "browser"
                 self._send(HTTPStatus.OK, {"server_version": blob["server_version"],
                                            "daily": blob["data"].get("daily"),
-                                           "questions": b.daily_questions(with_answer=with_answer)})
+                                           "questions": b.daily_questions(with_answer=with_answer,
+                                                                        user=b.user_of(self))})
                 return
 
             if path == "/api/kp" and method == "GET":

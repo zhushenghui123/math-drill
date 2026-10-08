@@ -502,6 +502,9 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 │                                  #   业务表 = questions / kp / attempts / **agent_notes**（复盘，ADR-017，只读）
 │                                  #           + **agent_difficulty**（agent 标注难度，ADR-018，append-only，取最新生效）
 │   ├── judge.py                   # fail-closed 判定器（ADR-003 / JUDGE_CONTRACT）
+│   ├── picker.py                  # ★ 每日选题算法（P2b，纯函数无 IO）：按天确定 · 跨章铺开 · 先新后旧 · 错题回炉
+│                                  #   **为什么在 core**：依赖矩阵禁止 `bridge → modules`，而 `/api/daily` 的取数层必须直接选题；
+│                                  #   `modules/picker/module.py` 只做再导出（将来开 rpc 时用它当门面）
 │   └── exact/                     # ★ 第 5 命脉：精确算术（原型 drill/exact.py 迁入；T0.5 执行）
 │       ├── __init__.py            # ★ 导出面：`from core.exact import det, rank, rref, ...`（P1 钦定的调用形式；v2.8 实测：无此文件该 import 报 ImportError）
 │       ├── exact.py
