@@ -13,8 +13,11 @@ REPO="${REPO:-/opt/math-drill}"
 echo "== 1. 专用用户（与阅读 agent 的 reader 隔离）"
 id mathdsh >/dev/null 2>&1 || useradd -r -m -d /home/mathdsh -s /bin/bash mathdsh
 
-echo "== 2. 插件副本"
+echo "== 2. 插件副本（**先清掉展示半边的残留**：旧副本里可能还有客户端半边，cp 只增不删）"
 [ -d "$PLUGIN_DST" ] || cp -a "$PLUGIN_SRC" "$PLUGIN_DST"
+rm -rf "$PLUGIN_DST/src/client" "$PLUGIN_DST/src/shared" "$PLUGIN_DST/lib" "$PLUGIN_DST/build" \
+       "$PLUGIN_DST/tsdown.config.ts" "$PLUGIN_DST/tools/build-client.mjs" \
+       "$PLUGIN_DST/tests/client-bundle.test.mjs" "$PLUGIN_DST/tests/client-runtime.test.mjs"
 chown -R mathdsh:mathdsh "$PLUGIN_DST"
 
 echo "== 3. 宿主依赖链（不链 ⇒ 宿主拒绝加载插件）"
@@ -22,11 +25,9 @@ DEST="$PLUGIN_DST/node_modules/@deepseek-ai"
 mkdir -p "$DEST"
 ln -sfn "$HOST_TREE"/* "$DEST"/ 2>/dev/null || true
 
-echo "== 4. 补两个客户端包（0.1.2 的 dsh 不声明它们）"
-su -s /bin/bash mathdsh -c "export PATH=/usr/bin:\$PATH; npm i -g --prefix $EXTRA_PREFIX \
-  @deepseek-ai/dsh-client-ui-slots@0.1.0-rc.6 @deepseek-ai/dsh-client-ui-primitives@0.1.0-rc.6" >/dev/null
-for d in "$EXTRA_PREFIX"/lib/node_modules/@deepseek-ai/*; do ln -sfn "$d" "$DEST/$(basename "$d")"; done
-chown -R mathdsh:mathdsh "$DEST"
+# == 4. （已删除）补两个客户端包 —— 那两步是为**插件的客户端半边**准备的；
+#    客户端半边已随 ADR-024 整体删除 ⇒ 这里不再需要。若目标机上还留着旧的 `dsh-extra`，它是**死重**，可自行清理。
+echo "== 4. 跳过（客户端半边已删除，ADR-024；旧 $EXTRA_PREFIX 属死重）"
 
 echo "== 5. profile 与插件安装（独立 DSH_HOME）"
 su -s /bin/bash mathdsh -c "export DSH_HOME=/home/mathdsh/.dsh; export PATH=/usr/bin:\$PATH; \

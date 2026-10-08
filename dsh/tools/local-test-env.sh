@@ -99,10 +99,17 @@ check() {
   else
     say "⚠️ boot roster 里没找到我们的插件（组合或构建出了问题）"
   fi
-  local code; code="$(curl -s -o /dev/null -w '%{http_code}' "$base/plugins/@math-drill/dsh-plugin/client.js")"
-  say "    客户端产物 /plugins/... → HTTP $code"
-  say "--- 状态路由（凭据不出宿主）---"
-  curl -s "$base/math-drill/summary" | head -c 200; echo
+  # ⚠️ 2026-10-08（ADR-024）：**客户端半边已删除** ⇒ 不再有 `/plugins/.../client.js` 可探，
+  # 也没有只给状态条用的 `/math-drill/summary` 路由。这里改成验**宿主半边的组合**：
+  # 插件进没进 `--dump-config`（工具是宿主侧注册的，组合树里出现即说明插件被加载）。
+  local dump
+  dump="$(cd "$DSH_HOME" && DSH_HOME="$DSH_HOME" "$DSH_BIN" --profile "$PROFILE" --dump-config 2>/dev/null | grep -c 'math-drill-dsh')"
+  if [ "${dump:-0}" -ge 1 ]; then
+    say "✅ 组合树里有 math-drill-dsh（宿主半边已加载）"
+  else
+    say "⚠️ 组合树里没有 math-drill-dsh —— 插件没被加载"
+  fi
+  say "    客户端产物与摘要路由**已按 ADR-024 删除**（404 属预期，不再是缺陷）"
 }
 
 case "$ACTION" in

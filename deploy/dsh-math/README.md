@@ -20,13 +20,20 @@
 2. **链宿主依赖**（v2.16 记过的坑：`link:` 装的插件必须能解析到 `@deepseek-ai/*`，否则宿主**拒绝加载**）：
    服务器是全局 npm 安装，真位置在 `/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai`（223 个包）⇒
    `ln -sfn <该目录>/*  <插件>/node_modules/@deepseek-ai/`；
-3. **补两个客户端包**：0.1.2 的 `dsh/package.json` **不声明** `dsh-client-ui-slots` / `dsh-client-ui-primitives`，
-   而插件的客户端半边要它们 ⇒ `npm i -g --prefix /home/mathdsh/dsh-extra @deepseek-ai/dsh-client-ui-slots@0.1.0-rc.6 @deepseek-ai/dsh-client-ui-primitives@0.1.0-rc.6`
-   再链进插件的 `node_modules`；
+3. ~~补两个客户端包~~ **（2026-10-08 起不再需要）**：那两步是为**插件的客户端半边**准备的；
+   客户端半边已随 **ADR-024** 整体删除（展示都在控制台里）⇒ 第 4 步已从 `setup.sh` 移除，
+   旧的 `dsh-extra`（39 MB）成为**可删的死重**（删之前确认没有任何进程引用它）。
 4. **服务间凭据**：由控制台 token 派生（值不回显）→ `/home/mathdsh/.dsh/math-drill/agent-credential`（600）；
 5. **装单元并起服务**；访问走 SSH 隧道：`ssh -N -L 39195:127.0.0.1:39195 root@<服务器>` 后开那条带 token 的链接。
 
-## 状态：**宿主半边与客户端半边都合规**（2026-10-07 复核翻案后更正）
+## 状态：**插件已收敛为「只做数据面」**（2026-10-08，ADR-024）
+
+> **本节历史**：10-07 经历了一次"我把三条测量假象当成缺口"的翻案（下留痕）；10-08 决策人直接拍板
+> **删掉整个客户端半边** —— 状态条 / 小组件面板 / 构建链 / 平台模块表 / 只读摘要路由全撤，
+> 只留"替 agent 打通数据通路"（三个读工具 + 两个写白名单工具 + `/math` 命令）。
+> 因此下面那些关于"客户端半边合规性"的考据，**现在只作历史留档**（不再有客户端半边可挂载）。
+>
+> ### 历史留档：宿主半边与客户端半边都合规（2026-10-07 复核翻案后更正）
 
 > ⚠️ **本节曾写错，留痕**：初稿写「客户端半边 ❌ 不被挂载」，依据是两条**测量假象**——
 > **(a)** 在 **303 空壳**响应上 grep（没跟重定向）⇒ 自然零命中；
@@ -42,7 +49,7 @@
 | 整页（带 cookie 跟跳转） | **200 / 24573 B** |
 | boot 图是否含本插件 | **含**——组合路由里 `…,@math-drill/dsh-plugin/client.js,…&rev=12bbc973f5f1`，另有本插件自己的组合 `/plugins/??@math-drill/dsh-plugin/client.js&rev=6894edaa2d6f4e0f-45` |
 | 宿主半边 | `/math-drill/summary` 回真数据（今日题单/弱项/进度），三个只读工具已注册 |
-| 机械层结论 | 0.1.2 的 seed 表（`react`/`jsx-runtime`/`react-dom`/`cordis`/`store`/`ui-slots`/`ui-primitives` 等 8 个名字）把 `ui-slots`/`ui-primitives` 当**外壳内置词**而非 npm 包 ⇒ `setup.sh` 第 4 步对浏览器侧是空操作（`dsh-extra` 39 MB 疑似死重）；`inject` 里的悬空名**静默跳过、零影响**；两个槽位 key（`math_drill_*`）**不在占用表里**，加法式不冲突 |
+| 机械层结论（历史） | 0.1.2 的 seed 表（`react`/`jsx-runtime`/`react-dom`/`cordis`/`store`/`ui-slots`/`ui-primitives` 等 8 个名字）把 `ui-slots`/`ui-primitives` 当**外壳内置词**而非 npm 包；`inject` 里的悬空名**静默跳过、零影响**。⇒ 这些现在都**无关了**：客户端半边已删除（ADR-024） |
 
 **还剩的唯一未验项（P0，30 分钟，需真浏览器）**：开一个对话后 `document.querySelectorAll('[data-math-drill]').length ≥ 1`
 —— ≥1 即关账；=0 才值得开新任务书，且嫌疑在**渲染/取数路径**，不在挂载契约。
