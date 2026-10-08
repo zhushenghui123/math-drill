@@ -43,11 +43,24 @@ docker run -d --name authelia --restart unless-stopped \
 ## 开户 / 改密
 
 ```bash
+# 开户（一条命令；口令落 600 文件，**默认不回显**）
+ssh root@<server> 'bash /root/add-user.sh <用户名> [邮箱] [显示名]'
+ssh root@<server> 'cat /root/authelia-newuser-<用户名>.txt'      # 取初始口令，交给对方
 # 改密（交互输入，不回显）
 ssh -t root@<server> /root/set-authelia-password.sh
-# 开户：生成哈希 → 追加进 users_database.yml → docker restart authelia
-docker exec authelia authelia crypto hash generate argon2 --password '<初始口令>'
 ```
+
+脚本在 `deploy/authelia/add-user.sh`（服务器上装成 `/root/add-user.sh`，700）。它的三条纪律：
+
+1. **初始口令不回显**：默认只写 `/root/authelia-newuser-<名>.txt`（600）并打印路径；
+   要直接在终端看（你自己在服务器上执行时）用 `PRINT=1 bash add-user.sh <名>`。
+2. **写完自检**：`grep -q "^  <名>:"` 必须命中，否则当场报错 —— ⚠️ 这里踩过坑：
+   `users_database.yml` 的**末行可能没有换行符**，直接 `>>` 会把新用户**粘在上一行尾巴上**
+   （YAML 变成一行乱码，且匹配不到 ⇒ 看起来像"静默没写进去"）；脚本先补一个换行再 append。
+3. **改动前留备份**：`users_database.yml.bak-<时间戳>`，撤销测试号就是 `cp` 回去 + `docker restart authelia`。
+
+新账号默认进 `users` 组（不是 `admins`）；他登录后看到的是**自己的空白控制台**
+（多用户隔离：作答/blob/题库标记各归各的）。
 
 ## 回滚（一条命令级）
 
