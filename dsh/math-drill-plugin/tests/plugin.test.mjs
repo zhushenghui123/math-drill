@@ -88,6 +88,16 @@ function startFakeUpstream({ onWrite } = {}) {
       return
     }
     if (req.method !== 'GET') {
+      if (req.method === 'POST' && req.url === '/m/coach/note') {
+        let raw = ''
+        req.on('data', (chunk) => { raw += chunk })
+        req.on('end', () => {
+          writes.push({ url: req.url, body: JSON.parse(raw || '{}') })
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, id: 7, qid: 'imp.x.s0001', kind: 'grade', user: 'owner' }))
+        })
+        return
+      }
       if (req.method === 'POST' && req.url === '/m/qbank/set_difficulty') {
         let raw = ''
         req.on('data', (chunk) => { raw += chunk })
@@ -201,9 +211,9 @@ describe('客户端：读方法若干 + **一个**写方法（ADR-015 决策 5 �
 
   it('写方法集合 = 白名单（想加写方法必须先立 ADR，这里会当场红）', () => {
     const methods = Object.keys(client()).sort()
-    assert.deepEqual(methods, ['attempts', 'daily', 'kp', 'setDifficulty', 'state'])
-    assert.deepEqual(WRITE_METHOD_NAMES, ['setDifficulty'],
-                     'ADR-018 代价 2：写面从"结构性没有"降级为"可枚举"，这个常量就是新护栏')
+    assert.deepEqual(methods, ['attempts', 'daily', 'kp', 'setDifficulty', 'state', 'writeNote'])
+    assert.deepEqual(WRITE_METHOD_NAMES, ['setDifficulty', 'writeNote'],
+                     'ADR-018 代价 2 + ADR-023：写面从"结构性没有"降级为"可枚举"，这个常量就是新护栏')
   })
 
   it('setDifficulty 走 POST + Bearer + JSON，且带上 src=dsh', async () => {
@@ -215,6 +225,19 @@ describe('客户端：读方法若干 + **一个**写方法（ADR-015 决策 5 �
     assert.equal(sent[0].url, '/m/qbank/set_difficulty')
     assert.deepEqual(sent[0].body, {
       qid: 'lin.det.05ea473736a6', difficulty: 4, reason: '要先配方', src: 'dsh',
+    })
+  })
+
+  it('writeNote 走 POST /m/coach/note，且带上 src=dsh（ADR-023 的第二个写方法）', async () => {
+    const before = upstream.writes.length
+    const out = await client().writeNote('imp.x.s0001', 'grade', '思路对，漏判别式', '第 3 步', 12)
+    assert.equal(out.id, 7)
+    const sent = upstream.writes.slice(before)
+    assert.equal(sent.length, 1, '只发一次请求')
+    assert.equal(sent[0].url, '/m/coach/note')
+    assert.deepEqual(sent[0].body, {
+      qid: 'imp.x.s0001', kind: 'grade', summary: '思路对，漏判别式',
+      reason: '第 3 步', attempt_id: 12, src: 'dsh',
     })
   })
 

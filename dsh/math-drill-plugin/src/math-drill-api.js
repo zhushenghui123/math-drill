@@ -27,7 +27,7 @@ export class MathDrillError extends Error {
  * **允许存在的写方法**（白名单真值）。加一个 = 必须先有 ADR（ADR-018 代价 2/4）。
  * @type {readonly string[]}
  */
-export const WRITE_METHOD_NAMES = Object.freeze(['setDifficulty'])
+export const WRITE_METHOD_NAMES = Object.freeze(['setDifficulty', 'writeNote'])
 
 /**
  * 建一个客户端（读方法若干 + 白名单里的写方法）。
@@ -110,6 +110,23 @@ export function createMathDrillClient({ baseUrl, credential, timeoutMs = 10_000,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ qid, difficulty, reason, src: 'dsh' }),
+    }),
+    /**
+     * `POST /m/coach/note` —— **第二个写方法**（ADR-023）：把 agent 的复盘/评分写回控制台。
+     *
+     * 红线（服务端也各有一道）：`kind` 只许 `grade`（对本人这次作答的评语）/ `review`（复盘提醒）；
+     * **不碰判分依据**（题面/答案/难度都不动）；落 `agent_notes` 旁表、带 `user_id`（只有本人看得到）。
+     */
+    writeNote: (qid, kind, summary, reason, attemptId) => send('/m/coach/note', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${credential}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        qid, kind, summary, reason, attempt_id: attemptId, src: 'dsh',
+      }),
     }),
   }
 }

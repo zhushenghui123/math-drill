@@ -18,15 +18,17 @@ import { summarizeDaily, summarizeProgress, summarizeReview } from './summarize.
 /** 本插件注册的工具名（顺序即呈现顺序）。 */
 export const MATH_DRILL_TOOL_NAMES = [
   'math_drill_progress', 'math_drill_today', 'math_drill_review', 'math_drill_set_difficulty',
+  'math_drill_write_review',
 ]
 
 /**
  * 其中**会改变服务端状态**的工具名 —— 白名单真值（ADR-018 代价 2）。
  *
- * ⚠️ 这两个常量是配套的：写面从"结构性没有"降级成"可枚举"以后，**这个数组就是新的护栏**，
- * 测试里断言它恰好等于 `['math_drill_set_difficulty']`。想加第二个写工具 = 先立 ADR。
+ * ⚠️ 这两个常量是配套的：写面从「结构性没有」降级成「可枚举」以后，**这个数组就是新的护栏**。
+ * 2026-10-08 加了第二个：`math_drill_write_review`（ADR-023 —— agent 复盘/评分写回）；
+ * 想加第三个 = 先立 ADR。
  */
-export const MATH_DRILL_WRITE_TOOL_NAMES = ['math_drill_set_difficulty']
+export const MATH_DRILL_WRITE_TOOL_NAMES = ['math_drill_set_difficulty', 'math_drill_write_review']
 
 /** 统一文本输出契约（沿用 bridge-browser 同款：一个 `{ text }` 对象 = 一个文本块）。 */
 const TEXT_OUTPUT = {
@@ -119,5 +121,42 @@ export function createMathDrillTools({ client }) {
     presentCall: () => ({ title: '标注题目难度', kind: 'edit' }),
   })
 
-  return [progress, today, review, setDifficulty]
+  const writeReview = defineTool({
+    name: 'math_drill_write_review',
+    description:
+      '把**你（agent）对用户这次作答的评语/复盘**写回研数控制台 —— 写完之后，用户在题目详情页'
+      + '就能看到它（否则你在对话里说完，话就散了）。'
+      + '**kind 只能是** `grade`（对他的作答评分/评语）或 `review`（讲解、提醒、下一步建议）；'
+      + '**这不是标准答案**：控制台把它显示为「agent 评」，判分依据（题面/答案/题库难度）一个字都不会动。'
+      + '**什么时候用**：你确实读过他的作答/讲过这道题之后 —— 不要为了刷存在感批量写。'
+      + '`summary` 是给用户看的结论（≤500 字），`reason` 是依据（≤500 字，可选）。',
+    parameters: {
+      qid: { type: 'string', description: '题号（如 imp.jmdw-xiandai.s0123）。' },
+      kind: { type: 'string', description: 'grade = 对本人这次作答的评分/评语；review = 复盘/提醒。' },
+      summary: { type: 'string', description: '给用户看的结论（≤500 字）。' },
+      reason: { type: 'string', description: '依据/理由（≤500 字，可选）。' },
+      attempt_id: { type: 'number', description: '可选：指定某次作答（必须是**这位用户自己的**）。' },
+    },
+    output: TEXT_OUTPUT,
+    async execute(args) {
+      const qid = String(args?.qid ?? '').trim()
+      const kind = String(args?.kind ?? '').trim()
+      const summary = String(args?.summary ?? '').trim()
+      const reason = args?.reason == null ? undefined : String(args.reason).trim()
+      if (!qid) throw new Error('需要 qid（题号）')
+      if (kind !== 'grade' && kind !== 'review') throw new Error('kind 只能是 grade 或 review')
+      if (!summary) throw new Error('需要 summary（给用户看的结论）')
+      if (summary.length > 500) throw new Error('summary 最多 500 字')
+      if (reason && reason.length > 500) throw new Error('reason 最多 500 字')
+      const attemptId = args?.attempt_id == null ? undefined : Number(args.attempt_id)
+      const out = await client.writeNote(qid, kind, summary, reason, attemptId)
+      return {
+        text: `已写回控制台：${qid} 的${kind === 'grade' ? '评分/评语' : '复盘'}（条目 #${out?.id}）`
+          + ' —— 用户在该题详情页能看到它（显示为「agent 评」，不冒充标准答案）。',
+      }
+    },
+    presentCall: () => ({ title: '写回 agent 复盘', kind: 'edit' }),
+  })
+
+  return [progress, today, review, setDifficulty, writeReview]
 }
