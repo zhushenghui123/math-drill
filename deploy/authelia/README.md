@@ -67,3 +67,36 @@ ssh -t root@<server> /root/set-authelia-password.sh
 `cp -p /var/backups/math-drill/pre-authelia-<TS>/Caddyfile /root/obsidian-livesync/Caddyfile`
 → `docker exec caddy-for-ols caddy validate --config /etc/caddy/Caddyfile`
 → `caddy reload` → `docker stop authelia`
+## ⚠️ 会话存储必须用 Redis（2026-10-09，决策人报"每次都要重新输密码"）
+
+**症状**：决策人反馈"每次登录都还要重新输密码"。
+
+**根因（实测）**：**Authelia 4.38 的会话默认存在进程内存里**（`storage.local` 那个 SQLite 只管认证日志/TOTP 等，
+**不管会话**）⇒ 只要 Authelia 重启（我配置期间重启了七八次；服务器重启、容器升级同理），**所有人被踢下线**。
+实测证据：同一 cookie，重启前 `/api/verify` **200** → 重启后 **302**（会话没了）。
+
+**修法**：加一个只在 docker 内网可达的 Redis 存会话，并给 Authelia 配 `session.redis`：
+
+```bash
+RPW=$(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)      # 只落 600 文件，不回显
+docker run -d --name authelia-redis --restart unless-stopped \
+  --network obsidian-livesync_internal --network-alias authelia-redis \
+  -v /root/authelia-redis:/data \
+  redis:7-alpine redis-server --requirepass "$RPW" --appendonly yes
+```
+
+```yaml
+session:
+  redis:                       # ← 少了这段，重启即掉线（默认内存态）
+    host: authelia-redis
+    port: 6379
+    password: <见 /root/authelia-redis-password.txt，别打印>
+```
+
+**验收（三条都要过）**：登录 200 → 验证 200 → **重启 Authelia 后仍 200** → **重启 Redis 后仍 200**（AOF 兜住）。
+
+**两个坑（都踩过）**
+1. **纯 HTTP 上不下发会话 cookie**：Authelia 的会话 cookie 是 `Secure` 的，所以拿 `http://127.0.0.1:9091`
+   做登录实验会看不到 `Set-Cookie`（我因此白测了两轮）——**实验必须走真实的 HTTPS 入口**。
+2. **查配置别整段 `sed`**：`session` 段里有明文 Redis 密码，整段打印过一次（已轮换）；
+   要看结构就 `sed -E 's/(password: ).*/\1<masked>/'`。
