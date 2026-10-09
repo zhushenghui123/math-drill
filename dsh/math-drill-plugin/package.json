@@ -2,12 +2,11 @@
   "name": "@math-drill/dsh-plugin",
   "version": "0.0.1",
   "private": true,
-  "description": "考研数学 × DeepSeek Harness 桥接插件：宿主半边（只读数据通路 + 两个 agent 工具 + 只读状态路由）+ 客户端半边（对话输入区状态条）",
+  "description": "考研数学 × DeepSeek Harness 桥接插件（只做数据面）：三个只读工具 + 两个写工具（难度 / 复盘），不写作答。ADR-024",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "dsh": {
