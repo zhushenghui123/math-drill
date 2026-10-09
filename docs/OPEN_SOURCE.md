@@ -62,3 +62,16 @@ gh repo create <账号>/<仓库名> --public --source=. --remote=origin --push
 - **凭据红线不变**：任何 key/token/口令继续只落 600 文件，**永不入仓**（本文件的审计就是这条的执行记录）。
 - **语料不入仓**：题目/教材/OCR 产物继续 gitignore；对外只放**生成器**与**格式契约**。
 - **上游礼貌**：fork 自 `111wukong/kaoyan-math-tutor`，README 顶部保留归属，不删 `ATTRIBUTION`。
+
+## 五、发布结果（2026-10-09 晚）
+
+| 项 | 值 |
+|---|---|
+| 仓库 | **https://github.com/zhushenghui123/math-drill**（public） |
+| 推送的 HEAD | `bf3bcf07293384a9b770444fd6413c18f473030d`（180 个跟踪文件） |
+| 推送方式 | SSH（`~/.ssh/config` 把 github.com 映射到 ssh.github.com；443 被掐，**显式 `-p 22` 才通**），第 3 次尝试成功（`* [new branch] master -> master`） |
+| ⚠️ 复核待办 | 推送成功后 GitHub 立刻变得不可达（`github.com` TLS EOF / `api.github.com` EOF / `ssh 22` connection closed），所以**"远端 HEAD == 本地 HEAD"这一步我只拿到 git 的成功回执，没有独立复核**。网络恢复后要补：`GIT_SSH_COMMAND='ssh -p 22' git ls-remote origin refs/heads/master` |
+| ⚠️ 默认分支待改 | 建仓时 GitHub 给了默认分支 `main`（并不存在），本仓实际分支是 `master` ⇒ 网络恢复后执行：`gh api -X PATCH /repos/zhushenghui123/math-drill -f default_branch=master` |
+| 发布后第一批提交（计划） | `README_EN.md` + 三张 fixture 实例截图（画面无真题原文 / token·QR / IP / 真名），并把 README 顶部的徽章与图重新打开 |
+
+**发布时的口径**（都已落在此前提交里）：工作树 **IP 0 残留** · README **断链 0** · 暂存区 **无 `data/`+`references/`** · `refcheck` 全绿。
