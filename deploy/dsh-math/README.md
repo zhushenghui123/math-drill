@@ -47,6 +47,12 @@
 
 ### 那道"还要 token"的门是怎么回事（2026-10-09 决策人问"直接访问域名不行吗"）
 
+> ⚠️ **链接格式（2026-10-09 决策人真的踩到 404）**：token 是查询参数，必须写 **`/?token=…`**。
+> 我第一版写链接文件的脚本漏了 `?`，生成出 `/token=…` ⇒ 被 DSH 当成路径 ⇒ 浏览器报
+> 「找不到与以下网址对应的网页」（**不是 DNS 问题**，记录当时是好的）。实测对照：`/token=…` = **404**，
+> `/?token=…` = **303 → 200**。已在 `setup.sh` 里改成 `printf 'https://math-dsh.zhu2006.xyz/?%s\n' "$TOK"`
+> 并加注释（`$TOK` 自带 `token=` 前缀，所以只需补 `?`）。
+
 **两道门，第二道是 DSH 自己的**：浏览器进来先过 Authelia（登录），过了之后 DSH 还会回一句
 `401 dsh web authentication required; reopen the URL printed by dsh web.` —— 这不看 Host/Origin，
 带 `--trusted-host` 也没用（实测：带可信 Host 不带 token = 401；带 Origin/Referer 伪浏览器 = 401；带 token = 303）。

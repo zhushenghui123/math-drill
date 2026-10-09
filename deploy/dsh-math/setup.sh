@@ -64,9 +64,11 @@ umask 077
 TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1)
 if [ -z "$TOK" ]; then
   echo "  ⚠️ 没拿到 token 行（服务没起来？）——**没有覆盖旧文件**，去看 /root/dsh-math.log"; exit 1; fi
+# ⚠️ 修正 ⑥（2026-10-09 决策人踩到 404）：`$TOK` 是 `token=…` 这一段，前面**必须**接 `?`。
+#    写成 `/%s` ⇒ 得到 `/token=…`（被当成路径）⇒ 浏览器 404「找不到与以下网址对应的网页」。
 TMP=$(mktemp /root/.dsh-math-url.XXXXXX)
-printf 'http://127.0.0.1:39195/%s\n' "$TOK" > "$TMP"
-printf 'https://math-dsh.zhu2006.xyz/%s\n' "$TOK" > "$TMP.pub"
+printf 'http://127.0.0.1:39195/?%s\n' "$TOK" > "$TMP"
+printf 'https://math-dsh.zhu2006.xyz/?%s\n' "$TOK" > "$TMP.pub"
 mv "$TMP" /root/dsh-math-access.txt && chmod 600 /root/dsh-math-access.txt
 mv "$TMP.pub" /root/dsh-math-public-url.txt && chmod 600 /root/dsh-math-public-url.txt
 echo "  已写 /root/dsh-math-access.txt（回环）+ /root/dsh-math-public-url.txt（公网，600）"
