@@ -45,6 +45,26 @@
 处置：**当场 `systemctl restart dsh-math` 换掉 token**（旧 token 实测 401 = 已死），并刷新两个链接文件；
 **以后查跳转只看 `%{http_code}`，别看 `%{redirect_url}`**（要看也得先掩码）。
 
+### 那道"还要 token"的门是怎么回事（2026-10-09 决策人问"直接访问域名不行吗"）
+
+**两道门，第二道是 DSH 自己的**：浏览器进来先过 Authelia（登录），过了之后 DSH 还会回一句
+`401 dsh web authentication required; reopen the URL printed by dsh web.` —— 这不看 Host/Origin，
+带 `--trusted-host` 也没用（实测：带可信 Host 不带 token = 401；带 Origin/Referer 伪浏览器 = 401；带 token = 303）。
+`--trusted-host` 管的是另一件事：`/api` 的 Host/Origin 栅栏（`isTrustedApiRequest`）。
+DSH 也没有"关掉这道门"的开关（`dsh web --help` 只有 `--host/--port/--trusted-host/--no-open`）。
+
+**但它只需要用一次**（源码 + 实测都确认）：
+
+| 事实 | 依据 |
+|---|---|
+| `?token=` 只在 `GET /` 时兑换成 cookie，然后 303 跳到干净的 `/` | `authorizeIndex()`：`sessionCookie(...)` + `location: "/"` |
+| cookie 寿命 **30 天** | `cookieMaxAgeDays` 默认 30 ⇒ 实测响应头 `Max-Age=2592000`（Expires 2026-11-08） |
+| cookie 的签名密钥**落盘**（存在 Web profile 的 credentials 里，不是每次启动随机） | `initializeSecret()` → `credentials.modifyRecord(AUTH_RECORD_KEY, …)` |
+| ⇒ **重启实例、换 launch token，老 cookie 照样有效** | 实测：token 链接换 cookie（200）→ 只用 cookie 访问（200）→ `systemctl restart`（token 已变）→ 旧 cookie **仍 200**，而裸域名无 cookie **401** |
+
+所以日常姿势是：**第一次** `ssh … 'cat /root/dsh-math-public-url.txt'` 打开那条链接换成 cookie，
+之后**直接开 `https://math-dsh.zhu2006.xyz/`**（建议存书签），直到 30 天后 cookie 过期、或你自己清了 cookie，再走一次。
+
 ## 状态：**插件已收敛为「只做数据面」**（2026-10-08，ADR-024）
 
 > **本节历史**：10-07 经历了一次"我把三条测量假象当成缺口"的翻案（下留痕）；10-08 决策人直接拍板
