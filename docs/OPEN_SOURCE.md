@@ -9,7 +9,7 @@
 |---|---|---|
 | **凭据** | ✅ **历史与工作树都没有真凭据** | 全部 94 个提交 / 190 个历史文件扫过：可疑文件名只有 `dsh/math-drill-plugin/src/credential.js`（那是**读**凭据的模块）；高熵赋值扫描（`api_key/token/password/secret = <20+ 字符>`）**零命中** |
 | **版权语料** | ✅ 未入库 | `.gitignore` 明确排除 `data/`、`references/`、`*.db`；跟踪文件里没有任何题目/教材/OCR 产物（最大文件 148K 是 `web/js/app.js`） |
-| **个人信息** | ✅ 工作树里没有真名/邮箱/口令 | 对「真实姓名 / 邮箱 / QQ 号 / 口令串」四类串扫描：**0 命中**；「决策人」实测 **166 次 / 30 个文件**（初稿写"29 次"是单位错），它是角色称呼不是 PII。⚠️ **本行故意不写出这些串本身**——写了就等于把它们带进仓库（我第一版真写了，2026-10-09 自检时发现并已改掉；**实际带进去的是"真名 + IP"两串，QQ 号数字串从未进过仓**——`git log -S` 全历史 0 命中） |
+| **个人信息** | ✅ 工作树里没有真名/邮箱/口令 | 对「真实姓名 / 邮箱 / QQ 号 / 口令串」四类串扫描：**0 命中**；「决策人」实测 **166 行 / 170 次 / 30 个文件**（`grep -c` 求和是行数、`grep -o | wc -l` 才是次数；初稿写"29 次"是单位错），它是角色称呼不是 PII。⚠️ **本行故意不写出这些串本身**——写了就等于把它们带进仓库（我第一版真写了，2026-10-09 自检时发现并已改掉；**实际带进去的是"真名 + IP"两串，QQ 号数字串从未进过仓**——`git log -S` 全历史 0 命中） |
 | **凭据文件** | ✅ 从未入库 | `.env`、`agent-credential`、`*.token`、`/etc/math-drill/token` 都不在版本库里（部署件只写**路径**不写值） |
 | **许可与归属** | ✅ 齐备 | `LICENSE`（MIT）· `ATTRIBUTION`（fork 自 `111wukong/kaoyan-math-tutor`，上游 commit 已钉定）· `THIRD_PARTY_NOTICES.md` |
 | **基础设施标识** | ⚠️ 会公开 | 服务器 IP：工作树 **2 个文件 4 处**（`deploy/dsh-math/README.md` · `docs/ARCHITECTURE.md`）· 域名：15 个文件。⚠️ **具体 IP 值不在本文件重复写**（同上理由） |
@@ -47,9 +47,9 @@ gh auth login
 # 2) 重写 README（面向公众）+ 按 §二 的口径做脱敏提交
 # 3) 建仓并推
 gh repo create <账号>/<仓库名> --public --source=. --remote=origin --push
-#    或：用户在网页建空仓 → git remote add origin … && git push -u origin <本地分支名>
-#    ⚠️ 本地分支实测是 **main**（`git rev-parse master` rc=128），与 whale-moe 的 master 不同；
-#       发布前二选一：`git branch -m main master`（对齐参照物）或按 main 写命令并登记偏离。**别照抄 master。**
+#    或：用户在网页建空仓 → git remote add origin … && git push -u origin master
+#    ✅ 本仓分支已 `git branch -m main master`（2026-10-09，对齐 whale-moe 的默认分支；回滚 = `git branch -m master main`），
+#       并已 `git branch --set-upstream-to=backup/master master` ⇒ 裸 `git push` 可用。
 
 # 4) 发布后立刻做三件事
 #    · 开 Issues + 在 README 写清"这是个人项目、不承诺维护/答疑"
