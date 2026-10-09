@@ -70,7 +70,8 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 │   ├── ARCHITECTURE.md        # ← 本文件 v2 冻结
 │   ├── JUDGE_CONTRACT.md      # 判定契约（answer_type 语义 + fail-closed 规则）
 │   ├── DECISIONS.md           # ADR 记录（001-005 + 后续）
-│   └── BOUNDARY.md            # 继承面边界表（2,606 行存留裁决）
+│   ├── BOUNDARY.md            # 继承面边界表（2,606 行存留裁决）
+│   └── OPEN_SOURCE.md         # 开源发布记录（审计结论 / 风格基准 / 发布步骤）
 ├── server/
 │   ├── app.py                 # http.server 入口 + 路由表 + token 中间件
 │   ├── judge.py               # fail-closed 判定器（类型驱动）— [Day-1]
