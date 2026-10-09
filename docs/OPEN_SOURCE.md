@@ -20,6 +20,15 @@
 
 ## 二、待决策项（发布前必须定）
 
+> **2026-10-09 更新（决策人给了参照物）**：以他自己的开源项目
+> [`zhushenghui123/whale-moe`](https://github.com/zhushenghui123/whale-moe) 为**风格基准**：
+> 中文 `README.md` + `README_EN.md` 双语 · MIT · `THIRD_PARTY_NOTICES.md` ·
+> **不使用** `.github/`、`CONTRIBUTING`、`CHANGELOG`（保持极简）；
+> README 结构 = 顶部图 + `# emoji 标题 · 中文副标题` + 一行 pitch（含英文关键词行）+ 徽章行
+> + 目录 + ✨特性/🖼️形态/🚀快速开始/🏗️架构/🧩开发/🔒安全/❓FAQ/🗺️路线图/📜致谢与许可。
+> **账号**：`zhushenghui123`（他公开项目用的身份就是这个 handle，不露真名）。
+> ✅ 已按此风格重写 `README.md`（本轮提交）；⏳ 待补 `README_EN.md` 与 `docs/screenshots/*.png`。
+
 1. **GitHub 账号与仓库名**：发布到哪个账号（个人 / 组织）？仓库名 `math-drill` 还是别的（如 `yanshu`）？
 2. **基础设施标识**：
    - 方案 A（推荐）：**域名保留**（那是项目自己的品牌），**服务器 IP 换成占位符**（`<your-server>`）——IP 会变、且暴露机房位置；
