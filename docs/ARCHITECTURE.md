@@ -70,8 +70,7 @@ math-drill/                    ← 工作名（命名开放：可换 kanm-drill 
 │   ├── ARCHITECTURE.md        # ← 本文件 v2 冻结
 │   ├── JUDGE_CONTRACT.md      # 判定契约（answer_type 语义 + fail-closed 规则）
 │   ├── DECISIONS.md           # ADR 记录（001-005 + 后续）
-│   ├── BOUNDARY.md            # 继承面边界表（2,606 行存留裁决）
-│   └── OPEN_SOURCE.md         # 开源发布记录（审计结论 / 风格基准 / 发布步骤）
+│   └── BOUNDARY.md            # 继承面边界表（2,606 行存留裁决）
 ├── server/
 │   ├── app.py                 # http.server 入口 + 路由表 + token 中间件
 │   ├── judge.py               # fail-closed 判定器（类型驱动）— [Day-1]
@@ -571,7 +570,7 @@ math-drill/                        # 仓库根（落盘路径见 IMPLEMENTATION_
 ├── deploy/                        # math-drill.service / caddy.block / backup.timer + backup.service（timer 必须配对 oneshot）/ logrotate.d/math-drill（**必须 copytruncate**，见 §12.1 注①）
 │   ├── authelia/                  # ★ 边缘鉴权（ADR-021）：服务器文件布局 / docker run 命令 / 开户改密 / 回滚（README 只有模板，密钥与用户文件永不入仓）
 │   └── dsh-math/                  # ★ 服务器上的「数学 DSH」实例：README（形态表 · 已知缺口更正 · 复验命令）+ dsh-math.service + setup.sh（幂等脚本）
-├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE
+├── docs/                          # ARCHITECTURE / JUDGE_CONTRACT / BOUNDARY / DATA_PIPELINE / OPEN_SOURCE
 │                                  #   / MODULE_TEMPLATE / IMPLEMENTATION_BRIEF / DECISIONS
 ├── data/                          # 运行时数据（.gitignore：data/、*.db、*.db-wal）
 ├── references/                    # 调研/对拍留档（含版权样本）——**.gitignore 排除，不入版本控制**（与 data/ 同待遇，v2.8 消解与 H8「版权数据零入仓」的冲突；不进仓库即不进远端）
