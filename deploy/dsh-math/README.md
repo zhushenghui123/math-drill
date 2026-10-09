@@ -36,7 +36,7 @@
 
 | 件 | 值 |
 |---|---|
-| DNS | `A math-dsh.zhu2006.xyz → 101.43.18.37`，**DNS-only**（与 `math`/`reader`/`auth` 同款，不套 CDN） |
+| DNS | `A math-dsh.zhu2006.xyz → <your-server>`，**DNS-only**（与 `math`/`reader`/`auth` 同款，不套 CDN） |
 | Caddy 块 | `deploy/caddy.block` 的 `math-dsh.*` 段：`tls dns cloudflare` ＋ `forward_auth`（Authelia）＋ `reverse_proxy 127.0.0.1:39195` |
 | 单元 | `ExecStart` 追加 `--trusted-host math-dsh.zhu2006.xyz` —— **不加这一条，反代过去是 401**（`/api` 的 browser-trust 栅栏只认已知 authority） |
 | 证书 | Let's Encrypt，DNS-01 挑战（Caddy 自签，实测 ~16 s 拿到；有效期至 2027-01-07） |

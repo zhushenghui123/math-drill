@@ -14,7 +14,8 @@
       name: '@math-drill/dsh-plugin'
       config:
         # math-drill 服务地址（生产：Caddy 反代后的域名）
-        baseUrl: 'https://math.zhu2006.xyz'
+        # ⚠️ 部署时改成你自己的站点（本仓开源，不写死任何人的域名）
+        baseUrl: 'https://math.example.com'
         # 服务间凭据文件（0600）。留空则只认 credentialEnv。
         credentialPath: !!js dshHomePath('math-drill/agent-credential')
         # 环境变量覆盖位（优先级高于文件）；名字里**没有**凭据值

@@ -608,7 +608,7 @@ clone 后删 `.git`（上游以 `ATTRIBUTION` 声明，见 `IMPLEMENTATION_BRIEF
 
 ## 12.（v2.5 追加）部署规格（回应复核 B6：T7 原先指向不存在的 §3.6）
 
-> 目标主机：腾讯云轻量 `101.43.18.37`（Ubuntu 24.04 / 4C / 3.6G / 27G 可用 / Python 3.12.3 实测）
+> 目标主机：腾讯云轻量 `<your-server>`（Ubuntu 24.04 / 4C / 3.6G / 27G 可用 / Python 3.12.3 实测）
 > 前提：该主机已有 Caddy(Docker) + CouchDB + dsh-web 在跑 —— **本项目的部署只允许「追加」，不得改动既有服务**
 
 ### 12.1 systemd 单元（`deploy/math-drill.service`）
@@ -646,7 +646,7 @@ math.zhu2006.xyz {
 ```
 
 **操作纪律**：① 改前 `cp Caddyfile Caddyfile.bak-<date>` **并记录原文件 `sha256sum`**（用于回滚校验，见 §12.4⑩）（该目录已 git 化，改动可回滚）② 只追加，不动 `obsidian.*` / `reader.*` 两块 ③ **先 validate 再 reload**：`docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile` 绿了，才执行 `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile` ④ **只准**上面的 `caddy reload` 或 `docker restart <caddy 容器名>`；**禁止 `docker compose up -d` / `docker compose restart` 一类全栈操作**（可能连带重建 CouchDB / dsh-web 容器，直接违反「不得改动既有服务」）⑤ 失败立刻回滚备份。
-**DNS（决策人手动）**：Cloudflare 加 `math.zhu2006.xyz` A 记录 → `101.43.18.37`，**DNS only（灰云）**（与既有规范一致，避免 CF 代理干扰）。
+**DNS（决策人手动）**：Cloudflare 加 `math.zhu2006.xyz` A 记录 → `<your-server>`，**DNS only（灰云）**（与既有规范一致，避免 CF 代理干扰）。
 
 ### 12.3 备份与自检（`deploy/backup.timer` → `deploy/backup.service` → `scripts/backup_check.sh`）
 
@@ -678,7 +678,7 @@ math.zhu2006.xyz {
 ④ 经 `/setup?t=<token>` 拿到 cookie 后访问 → 200；手机浏览器打开 https://math.zhu2006.xyz → 做题 2 道
 ⑤ 服务端：attempts 出现 2 行；systemctl restart → 数据仍在**且 cookie 仍有效**（派生式会话，重启不掉登录）
 ⑥ 静态暴露面正确：`/tests/run-all.js` 与任一 dotfile → 均 403
-⑦ DNS：`dig +short math.zhu2006.xyz` → `101.43.18.37`（A 记录由决策人手动添加）
+⑦ DNS：`dig +short math.zhu2006.xyz` → `<your-server>`（A 记录由决策人手动添加）
 ⑧ **Caddy 改动可证伪**：`git diff` 显示 Caddyfile 为**纯追加**（0 删行、0 改行）——只多出一个站点块
 ⑨ **既有服务未受影响**：`https://obsidian.<域名>/_up` 与 `https://reader.<域名>/` 各一次 `curl -s -o /dev/null -w '%{http_code}'` → 均 200（**必须走 https 公网面，不许只打本地端口或 http**）
 ⑩ 回滚可证：改前记录的 Caddyfile `sha256sum` 与备份文件一致（未回滚时以 ⑧ 的 diff 作为"只追加"证据）

@@ -8,7 +8,6 @@
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"/></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12"/></a>
   <a href="#"><img src="https://img.shields.io/badge/backend-stdlib--only-lightgrey.svg" alt="stdlib only"/></a>
-  <a href="README_EN.md"><img src="https://img.shields.io/badge/English-README-blue.svg" alt="English"/></a>
 </p>
 
 研数把「做题」这件事拆成四件可验证的事：**题目从哪来**（题源生成器 + 自建语料）、
@@ -55,9 +54,9 @@
 
 ## 🖼️ 形态展示
 
-![题库页](docs/screenshots/console-questions.png)
-![题目详情：难度系数与 agent 复盘](docs/screenshots/console-question-detail.png)
-![今日题单](docs/screenshots/console-daily.png)
+<!-- 截图待补（发布后第一批提交）：题库页 / 题目详情 / 今日题单。
+     口径：必须用自有生成器产物（web/js/data-questions.js）起的 fixture 实例截图，
+     画面内不得含真题原文、token·QR、IP、真名 —— 见 docs/OPEN_SOURCE.md「截图口径」。 -->
 
 ## 🚀 快速开始
 
@@ -195,4 +194,4 @@ modules/<name>/
 
 ---
 
-[English README](README_EN.md) · 欢迎 Star / Issue / PR —— 把它改成你自己的练题机 📐
+欢迎 Star / Issue / PR —— 把它改成你自己的练题机 📐

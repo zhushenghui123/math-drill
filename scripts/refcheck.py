@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import tempfile
@@ -568,7 +569,9 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = Path(__file__).resolve().parent.parent
     docs = repo / "docs"
-    fork = Path("/home/myuser/workspaces/DeepSeek/math-practice-survey/clones/kaoyan-math-tutor")
+    # 上游 fork 的检出处：默认按本机路径，可用环境变量覆盖（开源后别人机器上没有这个目录）
+    fork = Path(os.environ.get("MATH_DRILL_FORK",
+        "/home/myuser/workspaces/DeepSeek/math-practice-survey/clones/kaoyan-math-tutor"))
 
     problems = (check_c1(repo, docs) + check_c2(repo, docs) + check_c2b(repo)
                 + check_c3(repo, docs, fork) + check_c4(repo, docs))
