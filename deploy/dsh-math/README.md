@@ -51,24 +51,53 @@
 | 宿主半边 | `/math-drill/summary` 回真数据（今日题单/弱项/进度），三个只读工具已注册 |
 | 机械层结论（历史） | 0.1.2 的 seed 表（`react`/`jsx-runtime`/`react-dom`/`cordis`/`store`/`ui-slots`/`ui-primitives` 等 8 个名字）把 `ui-slots`/`ui-primitives` 当**外壳内置词**而非 npm 包；`inject` 里的悬空名**静默跳过、零影响**。⇒ 这些现在都**无关了**：客户端半边已删除（ADR-024） |
 
-**还剩的唯一未验项（P0，30 分钟，需真浏览器）**：开一个对话后 `document.querySelectorAll('[data-math-drill]').length ≥ 1`
-—— ≥1 即关账；=0 才值得开新任务书，且嫌疑在**渲染/取数路径**，不在挂载契约。
+**（2026-10-09 追记）那条"唯一未验项"已随 ADR-024 作废**：客户端半边整体删除后，页面上**不再有任何本插件的 DOM 标记** ——
+实测整页 `grep -c math-drill` = **0**、旧的 `/math-drill/summary` 路由 **404**。
+**这不是缺口，是删除后的正确形态**；再拿 `[data-math-drill]` 当验收判据，就是自己给自己造红灯。
+插件的验收判据已改为**数据面**（见文末「复验命令」）。
 
 ## 备份与回滚
 
 - 本实例**不动**系统全局安装、**不动** `/home/reader`（阅读 agent）；
 - 回滚 = `systemctl disable --now dsh-math.service` + 删单元（`rm` 由人工确认后执行）+ 保留 `/home/mathdsh/.dsh` 以便复查；
-- 手工产物：`/home/mathdsh/dsh011`（0.1.1 的私有前缀，299 MB，**已确认无用可删**）、`/home/mathdsh/dsh-extra`（补的两个包，**要留**）。
+- 手工产物：`/home/mathdsh/dsh-extra`（39 MB，当年给客户端半边补的两个包）—— **2026-10-09 实测零引用**
+  （profile / 单元 / 插件 package.json 里都不出现）⇒ **死重，可删**；
+  `dsh011`（0.1.1 的私有前缀）在本机上已不存在。
 
-## 复验命令
+## 复验命令（2026-10-09 换判据：**看数据面，不看 DOM**）
 
 ```bash
-systemctl is-active dsh-math.service dsh-web.service
-TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1 | cut -d= -f2)
-# ⚠️ 三条纪律（初稿就是在这里造出假象的）：① 必须带 cookie jar；② 必须跟跳转（-L）；③ 别用单文件 URL
-rm -f /tmp/cj; curl -sL -c /tmp/cj -b /tmp/cj -o /tmp/page.html -w '%{http_code} %{size_download}\n' \
-  "http://127.0.0.1:39195/?token=$TOK"                       # 期望 200 / ≈24.5 KB
-grep -c '@math-drill/dsh-plugin' /tmp/page.html              # 期望 ≥1（boot 图里含本插件）
-grep -o '/plugins/??[^"]*math-drill[^"]*' /tmp/page.html | head -2   # 真实（组合）路由长这样
-curl -s -b /tmp/cj "http://127.0.0.1:39195/math-drill/summary" | head -c 80   # 宿主半边应 ok:true
+# ① 两个实例都活着、且各在各的用户下（隔离）
+systemctl is-active dsh-math.service dsh-web.service          # 期望 active active
+systemctl show -p User --value dsh-math.service               # 期望 mathdsh
+systemctl show -p User --value dsh-web.service                # 期望 reader
+runuser -u mathdsh -- ls /home/reader/.dsh  2>&1 | head -1    # 期望 Permission denied
+runuser -u reader  -- ls /home/mathdsh/.dsh 2>&1 | head -1    # 期望 Permission denied
+
+# ② 我们的插件进了组合树 —— 这才是"插件装上了"的判据（只组合不启动）
+runuser -u mathdsh -- env DSH_HOME=/home/mathdsh/.dsh HOME=/home/mathdsh \
+  dsh --profile web --dump-config | grep -A6 math-drill-dsh
+
+# ③ 数据面真的通（agent 凭据 → 控制台；**凭据值不回显**）
+runuser -u mathdsh -- bash -c 'C=$(cat /home/mathdsh/.dsh/math-drill/agent-credential);
+  for p in /api/state /api/kp; do printf "%s -> " "$p";
+  curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $C" http://127.0.0.1:8081$p; done'   # 期望 200 200
+
+# ④ DSH 网页面（必须带 cookie jar 跟跳转；token 不回显）
+TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math-access.txt | cut -d= -f2)
+rm -f /tmp/cj; curl -sL -c /tmp/cj -b /tmp/cj -o /tmp/p.html -w '%{http_code} %{size_download}\n' \
+  "http://127.0.0.1:39195/?token=$TOK"                        # 期望 200 / ≈24 KB
+grep -c math-drill /tmp/p.html                                # 期望 0（**页面无痕迹是对的**，ADR-024 删了客户端半边）
 ```
+
+## 2026-10-09 复验记录（决策人问"DSH 带插件上服务器了吗 / 隔离严不严"）
+
+| 项 | 实测 |
+|---|---|
+| 三服务 | `math-drill` / `dsh-web` / `dsh-math` 全 **active** |
+| 插件树一致性 | 本地仓 ↔ `/home/mathdsh/math-drill-plugin` **逐文件 md5 相同**（11 个文件，`--delete` 同步，无客户端半边残留） |
+| 组合树 | `dsh --profile web --dump-config` 里 `math-drill-dsh` + `baseUrl: https://math.zhu2006.xyz` + `credentialPath` 在读 |
+| 数据面 | agent 凭据 → `/api/state` **200**、`/api/kp` **200**（桥接真通，不是纸面） |
+| 隔离 | `mathdsh ↛ /home/reader/.dsh`、`reader ↛ /home/mathdsh/.dsh` **双向 Permission denied**；端口 39195 / 3080 **只绑回环** |
+| 服务器健康 | load 0.11 · 内存 1801/3723 MB（可用 1921）· 磁盘 35% · Docker 5 容器 healthy |
+| 网络暴露面 | `dsh-math` **没有**公网入口（无 DNS、无 Caddy 块）：只能用 SSH 隧道 + 带 token 的链接 |

@@ -78,11 +78,17 @@ ssh -t root@<server> /root/set-authelia-password.sh
 **修法**：加一个只在 docker 内网可达的 Redis 存会话，并给 Authelia 配 `session.redis`：
 
 ```bash
-RPW=$(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)      # 只落 600 文件，不回显
+# 口令落 600 配置文件，**不进容器 argv**（见下面「口令不进容器 argv」一节）
+umask 077
+RPW=$(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)      # 不回显
+printf '%s' "$RPW" > /root/authelia-redis-password.txt
+printf '%s\n' "requirepass $RPW" 'appendonly yes' 'appendfsync everysec' 'dir /data' \
+  > /root/authelia-redis/redis.conf
+chown 999:0 /root/authelia-redis/redis.conf && chmod 600 /root/authelia-redis/redis.conf
 docker run -d --name authelia-redis --restart unless-stopped \
   --network obsidian-livesync_internal --network-alias authelia-redis \
   -v /root/authelia-redis:/data \
-  redis:7-alpine redis-server --requirepass "$RPW" --appendonly yes
+  redis:7-alpine redis-server /data/redis.conf
 ```
 
 ```yaml
@@ -100,3 +106,34 @@ session:
    做登录实验会看不到 `Set-Cookie`（我因此白测了两轮）——**实验必须走真实的 HTTPS 入口**。
 2. **查配置别整段 `sed`**：`session` 段里有明文 Redis 密码，整段打印过一次（已轮换）；
    要看结构就 `sed -E 's/(password: ).*/\1<masked>/'`。
+
+## ⚠️ 口令不许进容器 argv（2026-10-09，第二次泄漏之后加固）
+
+**为什么**：Redis 口令原先写在 `docker run … redis-server --requirepass <口令>` 里 ⇒ 同一个值同时活在
+**容器 argv / `docker inspect` / `docker events`** 三处。于是只要有人（包括我）为了查一条命令去翻
+`docker events`，口令就随那行输出进会话——**2026-10-09 就是这么泄的第二次**（第一次是整段 `sed` 打出配置）。
+两次都当场轮换了值。
+
+**加固**：口令改落 `/root/authelia-redis/redis.conf`（600，`chown 999:0` —— 容器写 `/data` 用的就是这个身份），
+容器只接一个参数 `redis-server /data/redis.conf`：
+
+```bash
+docker inspect authelia-redis -f '{{.Config.Cmd}}'    # ⇒ [redis-server /data/redis.conf]，零口令
+```
+
+**查会话数也别用 `redis-cli -a`**（`-a` 的值同样会进 `docker events`）——走 stdin 管道：
+
+```bash
+printf 'AUTH %s\nDBSIZE\n' "$(cat /root/authelia-redis-password.txt)" \
+  | docker exec -i authelia-redis redis-cli --no-auth-warning | tail -1
+```
+
+**这轮轮换的账（含回滚）**：备份 `/var/backups/math-drill/pre-redis-rotate-20261009-204250/`
+（旧 `configuration.yml` + `old-redis-password.txt`）⇒ 改 `configuration.yml` 的 `session.redis.password`
+＋重写 `redis.conf` ＋ `docker rm -f` 重建 redis ＋ `docker restart authelia`。
+**验收**：`DBSIZE` 5→5（重启前后会话原样还在，**决策人的登录态没被打断**）· 旧口令 `WRONGPASS` ·
+新口令 `OK PONG` · 再单独重启一次 redis 后 `DBSIZE` 仍 ≥6（AOF 兜住）· 容器 argv 里 `grep` 口令 = 0 ·
+`auth` 站 200 / `math` 站 302。
+
+**同批修掉的一处陈旧**：`session.remember_me_duration` 自 4.38 起已被 `session.remember_me` 取代
+（旧键会自动映射，但每次启动都报一条弃用告警）⇒ 已改名为新键，告警归零；备份 `pre-rememberme-20261009-204625/`。
