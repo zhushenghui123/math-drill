@@ -123,6 +123,54 @@ DSH 也没有"关掉这道门"的开关（`dsh web --help` 只有 `--host/--port
 >
 > ⚠️ **`.env` 是凭据文件**：`600`，只在服务器上，不进仓库、不进会话；要换 key 直接改这个文件再 `systemctl restart dsh-math`。
 
+## 人格与教学 Skill（2026-10-09）
+
+### 一、人格卡——插件 `dsh-soul-md`（社区件，阅读 agent 用的同款）
+
+- ⚠️ **版本必须锁 0.6.0**：我们这台 DSH 是 **0.1.2-rc.1**，而 `dsh-soul-md@0.10.x` 的 peer 要求 **DSH 0.2.x**
+  （装上不匹配）。0.6.0 的 peer 是 `^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-rc.1` ⇒ 正好匹配，且与阅读 agent 逐文件一致。
+  装法：`su -s /bin/bash mathdsh -c 'export DSH_HOME=/home/mathdsh/.dsh; cd …/profiles/web && dsh plugin --profile web add dsh-soul-md@0.6.0'`。
+- **卡片**写在 `$DSH_HOME/settings.yaml` 的 `soul-md.cards.math-mentor`，`active: math-mentor`，
+  并把工作区 `/home/mathdsh/workspace` 也映射到它（源件：`deploy/dsh-math/settings.yaml`）。
+- 卡里钉死了三件事：**判定不在 agent 侧**、**难度以 agent 判定为准**、**复盘写回一次**。
+- ⚠️ 卡文本里**不能出现双大括号**（插件的提示词变量语法会在渲染时报错）。
+
+### 二、教学 Skill——第三方 `universal-diagnostic-tutor`（SenmuuuuW）
+
+- 安装：**user 级 + symlink** —— `$DSH_HOME/skills/universal-diagnostic-tutor`
+  → `/home/mathdsh/skills-src/universal-diagnostic-tutor-skill/skills/universal-diagnostic-tutor`；
+  更新 = 到那个仓库 `git pull`（symlink 的好处：不用重装）。当前 v2.1.0（`075c189`）。
+- **适配性判定（2026-10-09，逐文件读过）**：
+  - ✅ **教学法完全适配**：诊断优先 / 一步一问 / 检查后**等他答** / 最小可防守剂量 / 默认不给答案 /
+    错因归因到"那条错路为什么诱人" / 数学公式规范 / 不泄露内部机器——这些正是我们在阅读 agent 上验证过、
+    并在人格卡里想表达的东西，它写得更系统。它的 `exam_patterns.md` **明确覆盖「考研数学」**。
+  - ❌ **运行时契约对不上**：它的 `learning_runtime_contract.md` 假设环境里有"学习者状态：目标 + 诊断长出的
+    节点图 + 六值 next-step 词汇（advance / … / diagnose-again）+ 一个记录动作"。**研数没有 per-知识点 的状态库**
+    —— 我们只有"题目粒度"的读取（进度/题单/复盘）和两个写工具（难度 / 评语）。
+  - ⇒ 处置：**原版保留、不改造**（第三方件，改了就无法 `git pull`），另加**我们自己的适配 skill**（下一节）。
+    第三方 skill 自己的规则也是"探测到能力才用，没有就不出声" ⇒ 原样装着不会有坏行为，只是那条能力空转。
+
+### 三、适配层——我们自己的 skill `math-drill-console`
+
+- 源件：`dsh/skills/math-drill-console/SKILL.md`（跟着仓库版本走；`setup.sh` 第 7c 步装到 `$DSH_HOME/skills/`）。
+- 它补的正是上面那条接缝：
+  1. **系统边界**：控制台判分、agent 讲解（判定链路无 LLM）；agent 的评语在控制台显示为「agent 评」，不是官方判分；
+  2. **五个工具**各自给什么、什么时候用（含"讨论过这道题再改难度""读过作答再写评语"）；
+  3. **写回纪律**：一次成型的判断写一次、不写"待定"、不批量刷、append-only（写错就再写一次改正）；
+  4. **六值词汇 → 研数落点**的映射表：难度 → `set_difficulty`；结论与下一步 → `write_review(kind=review)`；
+     只有整体薄弱点 → 不写，直接用复盘数据在对话里说；没有成型判断 → **什么都不写**；
+  5. **三条"不知道就会问错话"的操作事实**：agent **拿不到题面与答案**（要讲题得让用户贴题面或在控制台念）、
+     qid 是控制台身份证、写是 append-only；
+  6. **不许**：编造控制台数据、把 agent 评当官方判分、生成整门课大纲、绕开白名单直接改库、
+     用写工具代替控制台的"报错"按钮。
+
+### 四、每轮注入的分工线（写在人格卡里）
+
+> 教法（诊断优先、一步一问、检查后等答、最小可防守剂量）→ 按**教学 skill**；
+> 控制台的接口、写回时机、"下一步"落在哪 → 按 **`math-drill-console`**；两者冲突时，**接口优先**。
+
+这条分工线是这次适配的核心：第三方件继续 `git pull` 保持最新，我们的控制台契约永远不会被它的更新冲掉。
+
 > **本节历史**：10-07 经历了一次"我把三条测量假象当成缺口"的翻案（下留痕）；10-08 决策人直接拍板
 > **删掉整个客户端半边** —— 状态条 / 小组件面板 / 构建链 / 平台模块表 / 只读摘要路由全撤，
 > 只留"替 agent 打通数据通路"（三个读工具 + 两个写白名单工具 + `/math` 命令）。

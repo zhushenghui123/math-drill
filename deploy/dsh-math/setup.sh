@@ -79,6 +79,28 @@ systemctl restart dsh-math-go.service
 sleep 2
 echo "  入口服务: $(systemctl is-active dsh-math-go.service)（仅回环 39196）"
 
+echo "== 7c. Skill：教学法（第三方，clone + symlink）+ 本项目的控制台契约（自带） =="
+# 我们自己那份 skill 跟着仓库走：源件 dsh/skills/math-drill-console/
+SELF_SKILL_SRC="$(cd "$(dirname "$0")/../.." && pwd)/dsh/skills/math-drill-console"
+if [ -d "$SELF_SKILL_SRC" ]; then
+  rm -rf /home/mathdsh/.dsh/skills/math-drill-console
+  cp -R "$SELF_SKILL_SRC" /home/mathdsh/.dsh/skills/math-drill-console
+  chown -R mathdsh:mathdsh /home/mathdsh/.dsh/skills/math-drill-console
+  echo "  已装 math-drill-console（控制台契约）"
+else
+  echo "  ⚠️ 找不到 $SELF_SKILL_SRC —— 跳过（控制台契约 skill 未装）"
+fi
+# 第三方教学 skill：user 级 + symlink（git pull 即更新；见 deploy/dsh-math/README「Skill」节）
+UDT_REPO="${UDT_REPO:-/home/mathdsh/skills-src/universal-diagnostic-tutor-skill}"
+if [ ! -d "$UDT_REPO/.git" ]; then
+  install -d -o mathdsh -g mathdsh -m 755 "$(dirname "$UDT_REPO")"
+  su -s /bin/bash mathdsh -c "git clone --depth 1 https://github.com/SenmuuuuW/universal-diagnostic-tutor-skill.git '$UDT_REPO'" || true
+fi
+install -d -o mathdsh -g mathdsh -m 755 /home/mathdsh/.dsh/skills
+ln -sfn "$UDT_REPO/skills/universal-diagnostic-tutor" /home/mathdsh/.dsh/skills/universal-diagnostic-tutor
+chown -h mathdsh:mathdsh /home/mathdsh/.dsh/skills/universal-diagnostic-tutor
+ls -la /home/mathdsh/.dsh/skills/ | sed 's/^/  /'
+
 echo "== 8. 访问链接（不回显；公网 + 回环各一份）"
 # ⚠️ 修正 ④（同一类）：**先把链接取到临时文件，非空才 mv** —— 否则 grep 落空时
 #    `> access.txt` 会先把好文件清空，留下一个空的访问链接（初稿就是这个毛病）
