@@ -12,7 +12,8 @@
 | `DSH_HOME` | `/home/mathdsh/.dsh` | `/home/reader/.dsh` |
 | 端口 | **39195**（只绑 `127.0.0.1`；公网入口见下 `math-dsh.zhu2006.xyz`） | 3080 |
 | 日志 | `/root/dsh-math.log`（**600**；里面有访问 token，别打印） | — |
-| 访问链接 | `/root/dsh-math-public-url.txt`（600，`https://math-dsh.zhu2006.xyz/?token=…`，**日常用这个**）<br>`/root/dsh-math-access.txt`（600，回环版，给 SSH 隧道用） | — |
+| 日常入口 | **`https://dsh.zhu2006.xyz/`**（书签它就行；见下「一键入口」） |
+| 直连链接 | `/root/dsh-math-public-url.txt`（600，`https://math-dsh.zhu2006.xyz/?token=…`）<br>`/root/dsh-math-access.txt`（600，回环版，给 SSH 隧道用） | — |
 
 ## 怎么来的（`setup.sh` 就是这几步的可执行版）
 
@@ -74,6 +75,26 @@ DSH 也没有"关掉这道门"的开关（`dsh web --help` 只有 `--host/--port
 
 所以日常姿势是：**第一次** `ssh … 'cat /root/dsh-math-public-url.txt'` 打开那条链接换成 cookie，
 之后**直接开 `https://math-dsh.zhu2006.xyz/`**（建议存书签），直到 30 天后 cookie 过期、或你自己清了 cookie，再走一次。
+
+### 一键入口 `dsh.zhu2006.xyz`（2026-10-09，决策人："正常不是我直接访问域名进网站就够了吗？"）
+
+**问题**：上面那道 token 门 + "token 每次重启都换"，导致"直接开域名"要么 401，要么得反复 SSH 取链接。
+
+**做法**：新增 `dsh.zhu2006.xyz`（DNS `A → 服务器`，DNS-only）＋ Caddy 块（Authelia 同款）＋ 本机小服务
+`/usr/local/sbin/dsh-math-go`（源件 `deploy/dsh-math/go-redirect.py`，systemd 单元 `dsh-math-go.service`，**只绑 `127.0.0.1:39196`**）。
+它每次请求**现读** `dsh-math.log` 最后一条 `token=…`，回一个**自己会跳转的页面**（页面里有 `location.replace()` 与一个兜底链接）。
+
+**用户的姿势**：书签 `https://dsh.zhu2006.xyz/` → Authelia 登录（30 天 cookie）→ 自动跳进 DSH（DSH 自己的 cookie 也是 30 天）。
+⇒ 从今往后"直接开域名"就够了；**token 的轮换对用户完全不可见**（重启后入口自己指向新 token，实测）。
+
+**为什么是"页面自跳转"而不是 302（实测记录，别改回去）**：DSH 的 cookie 是在 `303 + Set-Cookie` 上发的。
+在"302 跳到另一个主机、再由那台主机回 303"的**重定向链**里，curl 的 cookie jar **不落**那个 cookie
+（实测：链末 200，但 jar 里只剩 Authelia 的会话 cookie ⇒ 下一次请求 401）；改成"页面自己 `location.replace()` 发起一次普通导航"后，
+落盘 + 下一次 200（与用户手工打开那条链接是同一条路径）。浏览器多半两种都行，但这条路上不需要赌。
+
+**验收（2026-10-09 实测）**：入口页 `200 + cache-control: no-store`（经 Authelia；无会话则 302）·
+页内目标链接指向当前 token（掩码核对）· 按浏览器两步走：导航过去 `303` → jar 里出现 `#HttpOnly_math-dsh.zhu2006.xyz` → 裸域名 **200** ·
+`systemctl restart dsh-math` 换 token 后，入口**自动**指向新 token（无需人工）· 旁证 `math-dsh`/`math`/`auth` 未受影响。
 
 ## 状态：**插件已收敛为「只做数据面」**（2026-10-08，ADR-024）
 

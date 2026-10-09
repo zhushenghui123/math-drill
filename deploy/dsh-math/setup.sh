@@ -55,6 +55,17 @@ sleep 25
 echo "  服务: $(systemctl is-active dsh-math.service)"
 echo "  阅读 agent（应仍 active）: $(systemctl is-active dsh-web.service)"
 
+echo "== 7b. 一键入口（dsh.<域> → 本机 39196 → 302/自跳转到当前 token 链接）"
+# 目的：用户只需要记一个地址（dsh.zhu2006.xyz），**永远不用碰 token**；token 每次重启由本服务现读。
+# 前置：Caddyfile 里要有 dsh.<域> 的站块（deploy/caddy.block）+ DNS 记录；缺了不影响本实例本身。
+install -m 755 "$(dirname "$0")/go-redirect.py" /usr/local/sbin/dsh-math-go
+install -m 644 "$(dirname "$0")/dsh-math-go.service" /etc/systemd/system/dsh-math-go.service
+systemctl daemon-reload
+systemctl enable dsh-math-go.service >/dev/null
+systemctl restart dsh-math-go.service
+sleep 2
+echo "  入口服务: $(systemctl is-active dsh-math-go.service)（仅回环 39196）"
+
 echo "== 8. 访问链接（不回显；公网 + 回环各一份）"
 # ⚠️ 修正 ④（同一类）：**先把链接取到临时文件，非空才 mv** —— 否则 grep 落空时
 #    `> access.txt` 会先把好文件清空，留下一个空的访问链接（初稿就是这个毛病）

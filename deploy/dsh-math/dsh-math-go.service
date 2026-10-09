@@ -1,0 +1,17 @@
+[Unit]
+Description=math DSH 一键入口（当前 launch token → 302；仅回环 39196）
+Documentation=file:/opt/math-drill/deploy/dsh-math/README.md
+After=network.target
+
+[Service]
+Type=simple
+# 读 /root/dsh-math.log（600 root）⇒ 必须以 root 跑
+ExecStart=/usr/bin/python3 /usr/local/sbin/dsh-math-go
+Restart=on-failure
+RestartSec=2
+# 它自己的日志会带 token（Location 头）⇒ 一律不落盘
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

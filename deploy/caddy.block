@@ -46,3 +46,22 @@ math-dsh.zhu2006.xyz {
 	}
 	reverse_proxy 127.0.0.1:39195
 }
+
+# 数学 DSH 的「一键入口」（2026-10-09 加）：一个可以把地址存成书签、永远不用碰 token 的入口。
+# 为什么单独一个子域：math-dsh.* 那块已经在正常工作，**不去动它**（Caddy 容器只 bind 挂了 Caddyfile 一个文件，
+# 加不了静态文件/新目录），所以用"本机小服务（39196）+ 独立子域"的隔离做法。
+# 39196 上是 deploy/dsh-math/go-redirect.py：请求时读 dsh-math.log 里最新的 token，
+# 回一个**自己会跳转的页面**（不是 302 —— 见该脚本头部关于"重定向链里 cookie 不落盘"的实测记录）。
+dsh.zhu2006.xyz {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	@browser {
+		not header Authorization *
+	}
+	forward_auth @browser 127.0.0.1:9091 {
+		uri /api/authz/forward-auth
+		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+	}
+	reverse_proxy 127.0.0.1:39196
+}
