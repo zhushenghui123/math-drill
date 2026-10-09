@@ -12,6 +12,7 @@
 | `DSH_HOME` | `/home/mathdsh/.dsh` | `/home/reader/.dsh` |
 | 端口 | **39195**（只绑 `127.0.0.1`；公网入口见下 `math-dsh.zhu2006.xyz`） | 3080 |
 | 日志 | `/root/dsh-math.log`（**600**；里面有访问 token，别打印） | — |
+| 工作区（DSH 里选的那个文件夹） | **`/home/mathdsh/workspace`**（750，含一份 README 说明三条约定：不放凭据 / 不改插件代码 / 不碰生产库） | — |
 | 日常入口 | **`https://dsh.zhu2006.xyz/`**（书签它就行；见下「一键入口」） |
 | 直连链接 | `/root/dsh-math-public-url.txt`（600，`https://math-dsh.zhu2006.xyz/?token=…`）<br>`/root/dsh-math-access.txt`（600，回环版，给 SSH 隧道用） | — |
 
