@@ -10,9 +10,9 @@
 | systemd 单元 | `dsh-math.service` | `dsh-web.service` |
 | 用户 | `mathdsh`（`useradd -r -m -d /home/mathdsh`） | `reader` |
 | `DSH_HOME` | `/home/mathdsh/.dsh` | `/home/reader/.dsh` |
-| 端口 | **39195**（只绑 `127.0.0.1`） | 3080 |
+| 端口 | **39195**（只绑 `127.0.0.1`；公网入口见下 `math-dsh.zhu2006.xyz`） | 3080 |
 | 日志 | `/root/dsh-math.log`（**600**；里面有访问 token，别打印） | — |
-| 访问链接 | `/root/dsh-math-access.txt`（600，`http://127.0.0.1:39195/?token=…`） | — |
+| 访问链接 | `/root/dsh-math-public-url.txt`（600，`https://math-dsh.zhu2006.xyz/?token=…`，**日常用这个**）<br>`/root/dsh-math-access.txt`（600，回环版，给 SSH 隧道用） | — |
 
 ## 怎么来的（`setup.sh` 就是这几步的可执行版）
 
@@ -24,7 +24,26 @@
    客户端半边已随 **ADR-024** 整体删除（展示都在控制台里）⇒ 第 4 步已从 `setup.sh` 移除，
    旧的 `dsh-extra`（39 MB）成为**可删的死重**（删之前确认没有任何进程引用它）。
 4. **服务间凭据**：由控制台 token 派生（值不回显）→ `/home/mathdsh/.dsh/math-drill/agent-credential`（600）；
-5. **装单元并起服务**；访问走 SSH 隧道：`ssh -N -L 39195:127.0.0.1:39195 root@<服务器>` 后开那条带 token 的链接。
+5. **装单元并起服务**。两条访问路径：
+   - **公网（日常）**：`https://math-dsh.zhu2006.xyz/?token=…` —— 先过 Authelia 登录，再到 DSH 自己的 token 栅栏；
+   - **SSH 隧道（应急/调试）**：`ssh -N -L 39195:127.0.0.1:39195 root@<服务器>` 后开回环版链接。
+
+## 公网入口（2026-10-09 加，`math-dsh.zhu2006.xyz`）
+
+决策人说"我先加个域名吧"，域名由我定、记录由我用 Caddy 容器里那把 Cloudflare token 直接建（不用去控制台点）。
+
+| 件 | 值 |
+|---|---|
+| DNS | `A math-dsh.zhu2006.xyz → 101.43.18.37`，**DNS-only**（与 `math`/`reader`/`auth` 同款，不套 CDN） |
+| Caddy 块 | `deploy/caddy.block` 的 `math-dsh.*` 段：`tls dns cloudflare` ＋ `forward_auth`（Authelia）＋ `reverse_proxy 127.0.0.1:39195` |
+| 单元 | `ExecStart` 追加 `--trusted-host math-dsh.zhu2006.xyz` —— **不加这一条，反代过去是 401**（`/api` 的 browser-trust 栅栏只认已知 authority） |
+| 证书 | Let's Encrypt，DNS-01 挑战（Caddy 自签，实测 ~16 s 拿到；有效期至 2027-01-07） |
+
+**验收（2026-10-09 实测）**：公网无会话 → **302** 去 `auth.zhu2006.xyz` · 带 `Authorization` 头（绕 forward_auth，只测通路）→ DSH 自己的 **401** · 带当前 token ＋ cookie jar → **200 / 24233 B**（`<title>DeepSeek Harness</title>`） · 回环带 token → **303** · 旁证：`math` 302 / `reader` 401 / `auth` 200 **均未被带坏**。
+
+**⚠️ 这一轮踩的坑（纪律，写进结构）**：验证公网跳转时我用了 `curl -w '%{redirect_url}'`，而那个 302 的 `rd=` 参数里**带着 token** ⇒ token 进了会话。
+处置：**当场 `systemctl restart dsh-math` 换掉 token**（旧 token 实测 401 = 已死），并刷新两个链接文件；
+**以后查跳转只看 `%{http_code}`，别看 `%{redirect_url}`**（要看也得先掩码）。
 
 ## 状态：**插件已收敛为「只做数据面」**（2026-10-08，ADR-024）
 
@@ -88,6 +107,13 @@ TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math-access.txt | cut -d= -f2)
 rm -f /tmp/cj; curl -sL -c /tmp/cj -b /tmp/cj -o /tmp/p.html -w '%{http_code} %{size_download}\n' \
   "http://127.0.0.1:39195/?token=$TOK"                        # 期望 200 / ≈24 KB
 grep -c math-drill /tmp/p.html                                # 期望 0（**页面无痕迹是对的**，ADR-024 删了客户端半边）
+
+# ⑤ 公网入口（Authelia 之后 + DSH 自己的 token 栅栏）
+curl -s -o /dev/null -w '%{http_code}\n' https://math-dsh.zhu2006.xyz/     # 无会话：期望 302（去登录页）
+TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math-public-url.txt | cut -d= -f2)
+rm -f /tmp/cj2; curl -sL -c /tmp/cj2 -b /tmp/cj2 -H 'Authorization: Bearer bypass' -o /tmp/p2.html \
+  -w '%{http_code} %{size_download}\n' "https://math-dsh.zhu2006.xyz/?token=$TOK"   # 期望 200 / ≈24 KB
+# ⚠️ 上面两条都**只打 %{http_code}**：302 的 %{redirect_url} 里带 token（踩过，当场换过 token）
 ```
 
 ## 2026-10-09 复验记录（决策人问"DSH 带插件上服务器了吗 / 隔离严不严"）
@@ -100,4 +126,4 @@ grep -c math-drill /tmp/p.html                                # 期望 0（**页
 | 数据面 | agent 凭据 → `/api/state` **200**、`/api/kp` **200**（桥接真通，不是纸面） |
 | 隔离 | `mathdsh ↛ /home/reader/.dsh`、`reader ↛ /home/mathdsh/.dsh` **双向 Permission denied**；端口 39195 / 3080 **只绑回环** |
 | 服务器健康 | load 0.11 · 内存 1801/3723 MB（可用 1921）· 磁盘 35% · Docker 5 容器 healthy |
-| 网络暴露面 | `dsh-math` **没有**公网入口（无 DNS、无 Caddy 块）：只能用 SSH 隧道 + 带 token 的链接 |
+| 网络暴露面 | 那次体检时（20:38）**还没有**公网入口；当晚 20:52 加了 `math-dsh.zhu2006.xyz`（Caddy + Authelia，见上一节） |

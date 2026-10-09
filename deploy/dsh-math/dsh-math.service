@@ -8,8 +8,9 @@ Type=simple
 User=mathdsh
 WorkingDirectory=/home/mathdsh/math-drill-plugin
 Environment=DSH_HOME=/home/mathdsh/.dsh
-# 只绑回环：对外要么 SSH 隧道，要么以后接 Caddy+Authelia（不直接暴露）
-ExecStart=/usr/bin/dsh web --host 127.0.0.1 --port 39195 --no-open
+# 只绑回环：公网入口走 Caddy（math-dsh.zhu2006.xyz，Authelia 鉴权）或 SSH 隧道，进程本身不直接暴露
+# --trusted-host：把公网 authority 加进 /api 的 browser-trust 栅栏（不加 ⇒ 反代过去 401）
+ExecStart=/usr/bin/dsh web --host 127.0.0.1 --port 39195 --no-open --trusted-host math-dsh.zhu2006.xyz
 Restart=on-failure
 # ⚠️ 日志里有 dsh web 的访问 token ⇒ 文件必须 600，**且不许把它的内容打进会话/工单**
 StandardOutput=append:/root/dsh-math.log

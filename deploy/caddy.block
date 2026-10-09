@@ -29,3 +29,20 @@ auth.zhu2006.xyz {
 	}
 	reverse_proxy 127.0.0.1:9091
 }
+
+# 数学 DSH 的公网入口（2026-10-09 加）：回环 39195 + Authelia 登录，与 math.zhu2006.xyz 同款
+# ⚠️ 配了这一段，dsh-math.service 的 ExecStart 也必须带 `--trusted-host math-dsh.zhu2006.xyz`（否则 401）
+math-dsh.zhu2006.xyz {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	# 浏览器走登录页；带 Authorization 头的服务间请求绕过（ADR-021 同款）
+	@browser {
+		not header Authorization *
+	}
+	forward_auth @browser 127.0.0.1:9091 {
+		uri /api/authz/forward-auth
+		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+	}
+	reverse_proxy 127.0.0.1:39195
+}

@@ -55,12 +55,19 @@ sleep 25
 echo "  服务: $(systemctl is-active dsh-math.service)"
 echo "  阅读 agent（应仍 active）: $(systemctl is-active dsh-web.service)"
 
-echo "== 8. 访问链接（不回显）"
+echo "== 8. 访问链接（不回显；公网 + 回环各一份）"
 # ⚠️ 修正 ④（同一类）：**先把链接取到临时文件，非空才 mv** —— 否则 grep 落空时
 #    `> access.txt` 会先把好文件清空，留下一个空的访问链接（初稿就是这个毛病）
+# ⚠️ 修正 ⑤（2026-10-09）：**每次 restart 都会换 token** ⇒ 两个链接文件必须同批刷新，
+#    否则 access.txt 留着旧 token，读起来像"服务坏了"（今天就这么白查过一次）。
 umask 077
-TMP=$(mktemp /root/.dsh-math-access.XXXXXX)
-grep -o 'http://127.0.0.1:39195/?token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1 > "$TMP"
-if [ -s "$TMP" ]; then mv "$TMP" /root/dsh-math-access.txt; chmod 600 /root/dsh-math-access.txt
-  echo "  已写 /root/dsh-math-access.txt（600）——服务器上 cat 取链接，本机 ssh -N -L 39195:127.0.0.1:39195 开隧道"
-else echo "  ⚠️ 没拿到 token 行（服务没起来？）——**没有覆盖旧的 access.txt**，去看 /root/dsh-math.log"; rm -f "$TMP"; exit 1; fi
+TOK=$(grep -o 'token=[A-Za-z0-9_-]*' /root/dsh-math.log | tail -1)
+if [ -z "$TOK" ]; then
+  echo "  ⚠️ 没拿到 token 行（服务没起来？）——**没有覆盖旧文件**，去看 /root/dsh-math.log"; exit 1; fi
+TMP=$(mktemp /root/.dsh-math-url.XXXXXX)
+printf 'http://127.0.0.1:39195/%s\n' "$TOK" > "$TMP"
+printf 'https://math-dsh.zhu2006.xyz/%s\n' "$TOK" > "$TMP.pub"
+mv "$TMP" /root/dsh-math-access.txt && chmod 600 /root/dsh-math-access.txt
+mv "$TMP.pub" /root/dsh-math-public-url.txt && chmod 600 /root/dsh-math-public-url.txt
+echo "  已写 /root/dsh-math-access.txt（回环）+ /root/dsh-math-public-url.txt（公网，600）"
+echo "  ——服务器上 cat 取链接；公网那条要过 Authelia 登录；回环那条配 ssh -N -L 39195:127.0.0.1:39195 用"
