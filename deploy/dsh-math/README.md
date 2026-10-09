@@ -41,6 +41,10 @@
 
 **验收（2026-10-09 实测）**：公网无会话 → **302** 去 `auth.zhu2006.xyz` · 带 `Authorization` 头（绕 forward_auth，只测通路）→ DSH 自己的 **401** · 带当前 token ＋ cookie jar → **200 / 24233 B**（`<title>DeepSeek Harness</title>`） · 回环带 token → **303** · 旁证：`math` 302 / `reader` 401 / `auth` 200 **均未被带坏**。
 
+> ⚠️ **首次打开还可能在界面里看到 `Failed to load plugins`** —— 那不是插件的问题，是 **Authelia 的 4096 B 读缓冲**
+> 被那条 2165 B 的组合 bundle URL 撞了（`431 Request Header Fields Too Large`）。**已在 `deploy/authelia/README.md` 记根因与修法**
+> （`server.buffers.read: 16384`），2026-10-09 已落生产验证：同一条 URL 431 → 302/200。
+
 **⚠️ 这一轮踩的坑（纪律，写进结构）**：验证公网跳转时我用了 `curl -w '%{redirect_url}'`，而那个 302 的 `rd=` 参数里**带着 token** ⇒ token 进了会话。
 处置：**当场 `systemctl restart dsh-math` 换掉 token**（旧 token 实测 401 = 已死），并刷新两个链接文件；
 **以后查跳转只看 `%{http_code}`，别看 `%{redirect_url}`**（要看也得先掩码）。

@@ -137,3 +137,35 @@ printf 'AUTH %s\nDBSIZE\n' "$(cat /root/authelia-redis-password.txt)" \
 
 **同批修掉的一处陈旧**：`session.remember_me_duration` 自 4.38 起已被 `session.remember_me` 取代
 （旧键会自动映射，但每次启动都报一条弃用告警）⇒ 已改名为新键，告警归零；备份 `pre-rememberme-20261009-204625/`。
+
+## ⚠️ 长 URL 会撞 Authelia 的 4096 B 读缓冲 ⇒ 431（2026-10-09，DSH 前端"Failed to load plugins"）
+
+**症状**：DSH 页面已经出来了，但界面报
+`Failed to load plugins … client-modules: bundle script /plugins/??@deepseek-ai/…&rev=… failed to load?`
+
+**根因（实测，不是猜）**：DSH 的客户端产物走"组合路由"，把 **45 个模块塞进同一条 URL**（实测 **2165 B**）。
+Caddy 的 `forward_auth` 会把这条原始 URI 带去问 Authelia，再加上 cookie / UA / X-Forwarded-* 等请求头，
+**整个请求头块超过了 fasthttp 默认的 4096 B 读缓冲**：
+
+```
+GET /api/authz/forward-auth??@deepseek-ai/dsh-typert-registry/client.js,…
+→ status_code=431  error="error when reading request headers: fasthttp: small read buffer … buffer size=4096"
+```
+
+Authelia 回 431 ⇒ 浏览器拿不到那段 JS ⇒ 前端只能报"加载插件失败"。**控制台（`math.*`）不受影响，因为它的 URL 都很短**
+——这也是为什么这个坑只在 DSH 上暴露。
+
+**修法**（`/root/authelia/configuration.yml`，实测生效）：
+
+```yaml
+server:
+  buffers:
+    read: 16384      # 默认 4096：长 URL + cookie 组合会超
+    write: 16384
+```
+
+**验收**：同一条 2165 B 的 bundle URL —— 改前 **431**；改后无名会 **302**（去登录页）、有会话 **200 / 3,764,501 B**。
+旁证 `math` 302 / `auth` 200 / `reader` 401 均不变。备份 `pre-authelia-buffers-20261009-211119/`。
+
+**教训**：`forward_auth` 的代价是"每个请求都要过一次鉴权服务"——**静态产物也会**。任何走 Caddy+Authelia 的站点，
+只要单条 URL 或 cookie 长到把请求头推过 4 KB，就会以 431（而不是 404/403）的形态炸在浏览器里，且后端日志一片干净。
