@@ -1,0 +1,25 @@
+# 数学 DSH 的 `$DSH_HOME/settings.yaml` 模板（装到 /home/mathdsh/.dsh/settings.yaml，600）
+#
+# 决策人指定（2026-10-09）：**只配一个模型** —— 与 Codex/Claude 同款的 OpenCode Go「DeepSeek V4.1 Flash」。
+# 为什么只留一个：其他模型可能很贵，模型选择器里多列一个就多一次误选的机会（成本纪律）。
+#
+# ⚠️ **凭据不在这个文件里**：API key 放在 `$DSH_HOME/.env`（600）里的 `OPENCODE_GO_API_KEY`，
+#    这里只引用环境变量名。DSH 自己会加载它（`dsh-app-boot` 的 `loadLayeredEnv()`：
+#    project 层 = 调用目录的 `.env`，user 层 = `$DSH_HOME/.env`）⇒ 不需要 systemd 的 EnvironmentFile。
+# ⚠️ provider 要求 `x-opencode-session` 头：少了它服务端回 **400 MissingSessionID**（实测踩过）。
+llm-pi-ai:
+  providers:
+    opencode-go:
+      apiKeyEnv: OPENCODE_GO_API_KEY
+      api: openai-completions
+      baseURL: https://opencode.ai/zen/go/v1
+      headers:
+        x-opencode-session: dsh-harness-session
+      models:
+        - id: deepseek-flash
+          name: DeepSeek V4.1 Flash (OpenCode Go)
+          contextWindow: 1000000
+          maxTokens: 384000
+agent-default-model:
+  provider: opencode-go
+  model: deepseek-flash

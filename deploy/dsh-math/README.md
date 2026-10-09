@@ -99,6 +99,30 @@ DSH 也没有"关掉这道门"的开关（`dsh web --help` 只有 `--host/--port
 
 ## 状态：**插件已收敛为「只做数据面」**（2026-10-08，ADR-024）
 
+## 模型与凭据（2026-10-09 补上——决策人问"怎么没有配 API key"）
+
+**只配一个模型**：`deepseek-flash` = **DeepSeek V4.1 Flash（OpenCode Go）**，与 Codex / Claude 同款。
+理由（决策人定的成本纪律）：**其他模型可能很贵**，模型选择器里多列一个就多一次误选的机会 ⇒ provider 表里只留这一个。
+
+| 件 | 位置 | 说明 |
+|---|---|---|
+| 模型/provider | `$DSH_HOME/settings.yaml`（600） | 源件：`deploy/dsh-math/settings.yaml`（**无凭据**，只有 `apiKeyEnv` 这个环境变量名） |
+| 默认模型 | 同上 `agent-default-model:` | `provider: opencode-go` / `model: deepseek-flash` |
+| **API key** | `$DSH_HOME/.env`（600，`OPENCODE_GO_API_KEY`） | 照搬**阅读 agent** 的那把（决策人："可以直接照搬阅读 agent 的 API"）。**永不入仓** |
+
+**为什么不用 systemd 的 `EnvironmentFile`**：DSH 自己会加载 `$DSH_HOME/.env`
+（`dsh-app-boot` 的 `loadLayeredEnv()`：project 层 = 调用目录 `.env`，user 层 = `$DSH_HOME/.env`，继承的环境优先）。
+阅读 agent 也是这么工作的（它的单元里同样没有 `EnvironmentFile`）。
+
+**验收（2026-10-09 实测）**：`GET https://opencode.ai/zen/go/v1/models` → **200**，38 个模型里含 `deepseek-flash` ·
+`POST /chat/completions`（模型 `deepseek-flash`）→ **200，返回 `model: deepseek-flash`**，42 tokens ·
+实例重启后 `active`、日志无报错。
+
+> ⚠️ **provider 要求 `x-opencode-session` 头**（阅读 agent 配置里就有 `x-opencode-session: dsh-harness-session`）：
+> 少了它服务端回 **400 MissingSessionID**——第一次手测时就踩了这个（不是 key 的问题）。
+>
+> ⚠️ **`.env` 是凭据文件**：`600`，只在服务器上，不进仓库、不进会话；要换 key 直接改这个文件再 `systemctl restart dsh-math`。
+
 > **本节历史**：10-07 经历了一次"我把三条测量假象当成缺口"的翻案（下留痕）；10-08 决策人直接拍板
 > **删掉整个客户端半边** —— 状态条 / 小组件面板 / 构建链 / 平台模块表 / 只读摘要路由全撤，
 > 只留"替 agent 打通数据通路"（三个读工具 + 两个写白名单工具 + `/math` 命令）。

@@ -42,6 +42,19 @@ CRED=$(cd "$REPO" && MATH_DRILL_TOKEN_FILE="$TOKEN_FILE" python3 -c \
 install -o mathdsh -g mathdsh -m 600 /dev/stdin /home/mathdsh/.dsh/math-drill/agent-credential <<< "$CRED"
 unset CRED
 
+echo "== 6b. 模型与 API key（2026-10-09）"
+# 模型配置：只配一个 deepseek-flash（DeepSeek V4.1 Flash）—— 见 settings.yaml 里的成本纪律说明
+install -o mathdsh -g mathdsh -m 600 "$(dirname "$0")/settings.yaml" /home/mathdsh/.dsh/settings.yaml
+# key：DSH 自己会读 $DSH_HOME/.env（dsh-app-boot loadLayeredEnv）；缺了就照搬阅读 agent 的那把
+if [ ! -s /home/mathdsh/.dsh/.env ] && [ -s /home/reader/.dsh/.env ]; then
+  install -o mathdsh -g mathdsh -m 600 /home/reader/.dsh/.env /home/mathdsh/.dsh/.env
+  echo "  已照搬阅读 agent 的 .env（600；值不回显）"
+elif [ -s /home/mathdsh/.dsh/.env ]; then
+  echo "  .env 已存在，保留（600）"
+else
+  echo "  ⚠️ 没有 .env：请手工放一把 OpenCode Go key 到 /home/mathdsh/.dsh/.env（OPENCODE_GO_API_KEY=…，600）"
+fi
+
 echo "== 7. systemd 单元"
 install -m 644 "$(dirname "$0")/dsh-math.service" /etc/systemd/system/dsh-math.service
 # ⚠️ 三处幂等修正（2026-10-07 复核指出）：
